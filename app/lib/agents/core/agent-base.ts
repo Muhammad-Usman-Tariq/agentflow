@@ -1,0 +1,276 @@
+import type { AgentInput, AgentOutput, AgentConfig, IAgent } from '../types/agent.types';
+
+interface ProviderConfig {
+  name: string;
+  apiKey: string;
+  model: string;
+  baseUrl?: string;
+}
+
+export abstract class AgentBase implements IAgent {
+  config: AgentConfig;
+
+  constructor(config: AgentConfig) {
+    this.config = config;
+  }
+
+  abstract execute(input: AgentInput): Promise<AgentOutput>;
+
+  async run(input: AgentInput): Promise<AgentOutput> {
+    let attempt = 0;
+
+    while (attempt < this.config.maxRetries) {
+      attempt++;
+      console.log(`[${this.config.name}] Attempt ${attempt}/${this.config.maxRetries}`);
+
+      try {
+        const result = await this.withTimeout(
+          this.execute(input),
+          this.config.timeoutMs
+        );
+        console.log(`[${this.config.name}] ✅ Success on attempt ${attempt}`);
+        return result;
+
+      } catch (error: any) {
+        console.error(`[${this.config.name}] ❌ Attempt ${attempt} failed:`, error.message);
+
+        if (attempt >= this.config.maxRetries) {
+          return {
+            success: false,
+            agentName: this.config.name,
+            data: null,
+            error: `Failed after ${attempt} attempts: ${error.message}`,
+          };
+        }
+
+        const waitMs = 1000 * attempt;
+        console.log(`[${this.config.name}] Waiting ${waitMs}ms before retry...`);
+        await this.sleep(waitMs);
+      }
+    }
+
+    return {
+      success: false,
+      agentName: this.config.name,
+      data: null,
+      error: 'Unknown error',
+    };
+  }
+
+  protected async callLLM(
+    systemPrompt: string,
+    userMessage: string,
+    expectJson: boolean = false
+  ): Promise<string> {
+    const providers = this.buildProviderList();
+
+    if (providers.length === 0) {
+      throw new Error('No providers configured in .env.local');
+    }
+
+    let lastError = '';
+
+    for (const provider of providers) {
+      try {
+        console.log(`[${this.config.name}] Trying: ${provider.name} / ${provider.model}`);
+        const text = await this.callProvider(provider, systemPrompt, userMessage);
+
+        if (text) {
+          console.log(`[${this.config.name}] ✅ Success with: ${provider.name}`);
+          return expectJson ? this.extractJson(text) : text;
+        }
+
+      } catch (error: any) {
+        lastError = error.message;
+        console.warn(`[${this.config.name}] ⚠️ ${provider.name} failed: ${error.message}`);
+        console.log(`[${this.config.name}] → Trying next provider...`);
+      }
+    }
+
+    throw new Error(`All providers failed. Last error: ${lastError}`);
+  }
+
+  private buildProviderList(): ProviderConfig[] {
+    const providers: ProviderConfig[] = [];
+
+    if (process.env.PROVIDER_NAME && process.env.PROVIDER_API_KEY) {
+      providers.push({
+        name: process.env.PROVIDER_NAME.toLowerCase(),
+        apiKey: process.env.PROVIDER_API_KEY,
+        model: process.env.DEFAULT_MODEL || '',
+        baseUrl: process.env.PROVIDER_BASE_URL,
+      });
+    }
+
+    for (let i = 1; i <= 3; i++) {
+      const name = process.env[`FALLBACK_${i}_NAME`];
+      const apiKey = process.env[`FALLBACK_${i}_API_KEY`];
+      const model = process.env[`FALLBACK_${i}_MODEL`];
+      const baseUrl = process.env[`FALLBACK_${i}_BASE_URL`];
+
+      if (name && apiKey && model) {
+        providers.push({
+          name: name.toLowerCase(),
+          apiKey,
+          model,
+          baseUrl,
+        });
+      }
+    }
+
+    return providers;
+  }
+
+  private async callProvider(
+    provider: ProviderConfig,
+    systemPrompt: string,
+    userMessage: string
+  ): Promise<string> {
+    const { name, apiKey, model, baseUrl } = provider;
+
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMessage },
+    ];
+
+    let apiUrl = '';
+    let headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    };
+    let bodyPayload: any = {};
+
+    if (name === 'anthropic') {
+      apiUrl = 'https://api.anthropic.com/v1/messages';
+      headers = {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      };
+      bodyPayload = {
+        model,
+        max_tokens: 8000,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userMessage }],
+      };
+    } else if (name === 'google') {
+      apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      headers = { 'Content-Type': 'application/json' };
+      bodyPayload = {
+        contents: [{ parts: [{ text: `${systemPrompt}\n\n${userMessage}` }] }],
+      };
+    } else {
+      const detectedUrl = baseUrl || this.autoDetectBaseUrl(name);
+      apiUrl = `${detectedUrl}/chat/completions`;
+      bodyPayload = { model, max_tokens: 8000, messages };
+    }
+
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(bodyPayload),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`${response.status}: ${errText}`);
+    }
+
+    const data = await response.json() as any;
+
+    let text = '';
+    if (name === 'anthropic') {
+      text = data.content?.[0]?.text || '';
+    } else if (name === 'google') {
+      text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    } else {
+      text = data.choices?.[0]?.message?.content || '';
+    }
+
+    return text;
+  }
+
+  private autoDetectBaseUrl(providerName: string): string {
+    const known: Record<string, string> = {
+      'groq':       'https://api.groq.com/openai/v1',
+      'openrouter': 'https://openrouter.ai/api/v1',
+      'openai':     'https://api.openai.com/v1',
+      'together':   'https://api.together.xyz/v1',
+      'deepseek':   'https://api.deepseek.com/v1',
+      'mistral':    'https://api.mistral.ai/v1',
+      'fireworks':  'https://api.fireworks.ai/inference/v1',
+      'cerebras':   'https://api.cerebras.ai/v1',
+      'xai':        'https://api.x.ai/v1',
+    };
+    return known[providerName] || 'https://api.openai.com/v1';
+  }
+  protected extractJson(text: string): string {
+  let cleaned = text
+    .replace(/```json\n?/g, '')
+    .replace(/```\n?/g, '')
+    .trim();
+
+  const firstBrace = cleaned.indexOf('{');
+  const firstBracket = cleaned.indexOf('[');
+
+  let start = -1;
+  if (firstBrace === -1) start = firstBracket;
+  else if (firstBracket === -1) start = firstBrace;
+  else start = Math.min(firstBrace, firstBracket);
+
+  if (start === -1) throw new Error('No JSON found in LLM response');
+
+  const lastBrace = cleaned.lastIndexOf('}');
+  const lastBracket = cleaned.lastIndexOf(']');
+  const end = Math.max(lastBrace, lastBracket);
+
+  if (end === -1) throw new Error('Invalid JSON in LLM response');
+
+  cleaned = cleaned.substring(start, end + 1);
+
+  // Fix control characters
+  cleaned = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+
+  // Try parse directly first
+  try {
+    JSON.parse(cleaned);
+    return cleaned;
+  } catch {
+    // Escape unescaped newlines inside strings
+    cleaned = cleaned.replace(
+      /"((?:[^"\\]|\\.)*)"/g,
+      (_match, p1) => `"${p1
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r')
+        .replace(/\t/g, '\\t')
+      }"`
+    );
+    JSON.parse(cleaned); // validate
+    return cleaned;
+  }
+}
+
+protected parseJson<T>(jsonString: string): T {
+  try {
+    return JSON.parse(jsonString) as T;
+  } catch (e) {
+    throw new Error(`Failed to parse JSON: ${e}`);
+  }
+}
+
+private withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Agent ${this.config.name} timed out after ${ms}ms`));
+    }, ms);
+
+    promise
+      .then((result) => { clearTimeout(timer); resolve(result); })
+      .catch((err) => { clearTimeout(timer); reject(err); });
+  });
+}
+
+private sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+}

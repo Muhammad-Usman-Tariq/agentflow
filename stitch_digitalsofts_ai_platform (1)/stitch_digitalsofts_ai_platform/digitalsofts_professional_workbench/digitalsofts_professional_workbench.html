@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+
+<html class="h-full" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>DigitalSofts Main Chat Screen</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "secondary-fixed": "#e5e2e1",
+                      "page-bg": "#faf9f7",
+                      "surface-tint": "#ad3313",
+                      "on-background": "#1f1b17",
+                      "primary-fixed-dim": "#ffb4a2",
+                      "border-warm": "#e8e4df",
+                      "outline": "#8d716a",
+                      "tertiary-container": "#008098",
+                      "background": "#fff8f4",
+                      "text-tertiary": "#8c8782",
+                      "secondary-fixed-dim": "#c8c6c5",
+                      "primary-fixed": "#ffdad2",
+                      "on-tertiary-fixed": "#001f27",
+                      "error": "#ba1a1a",
+                      "primary-container": "#cb4927",
+                      "on-secondary-container": "#636262",
+                      "inverse-surface": "#34302b",
+                      "primary": "#a93011",
+                      "outline-variant": "#e1bfb7",
+                      "inverse-on-surface": "#f8efe8",
+                      "on-surface": "#1f1b17",
+                      "surface-container": "#f5ece6",
+                      "surface-subtle": "#f5f4f2",
+                      "on-tertiary": "#ffffff",
+                      "on-error": "#ffffff",
+                      "on-secondary": "#ffffff",
+                      "surface-dim": "#e1d8d2",
+                      "surface-bright": "#fff8f4",
+                      "secondary-container": "#e2dfde",
+                      "on-error-container": "#93000a",
+                      "on-secondary-fixed": "#1c1b1b",
+                      "error-container": "#ffdad6",
+                      "on-tertiary-fixed-variant": "#004e5e",
+                      "on-primary-fixed": "#3c0700",
+                      "on-primary": "#ffffff",
+                      "on-primary-fixed-variant": "#891d00",
+                      "surface-container-highest": "#eae1da",
+                      "tertiary-fixed": "#b1ecff",
+                      "surface-container-high": "#f0e6e0",
+                      "on-surface-variant": "#59413b",
+                      "tertiary": "#006579",
+                      "tertiary-fixed-dim": "#66d5f3",
+                      "secondary": "#5f5e5e",
+                      "on-secondary-fixed-variant": "#474746",
+                      "surface-container-low": "#fbf2eb",
+                      "on-primary-container": "#fffbff",
+                      "on-tertiary-container": "#f9fdff",
+                      "surface": "#ffffff",
+                      "surface-variant": "#eae1da",
+                      "surface-container-lowest": "#ffffff",
+                      "inverse-primary": "#ffb4a2",
+                      "ds-gray-900": "#111111",
+                      "ds-gray-800": "#333333",
+                      "ds-gray-700": "#444444",
+                      "ds-gray-600": "#666666",
+                      "ds-gray-500": "#888888",
+                      "ds-gray-400": "#aaaaaa",
+                      "ds-gray-300": "#cccccc",
+                      "ds-gray-200": "#eaeaea",
+                      "ds-gray-100": "#fafafa"
+              },
+              "borderRadius": {
+                      "DEFAULT": "4px",
+                      "sm": "2px",
+                      "md": "6px",
+                      "lg": "8px",
+                      "xl": "12px",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "margin-mobile": "16px",
+                      "container-max": "1440px",
+                      "unit": "4px",
+                      "margin-desktop": "32px",
+                      "gutter": "24px"
+              },
+              "fontFamily": {
+                      "code-sm": [
+                              "JetBrains Mono", "monospace"
+                      ],
+                      "body-md": [
+                              "Inter", "sans-serif"
+                      ],
+                      "headline-lg": [
+                              "Inter", "sans-serif"
+                      ],
+                      "label-caps": [
+                              "JetBrains Mono", "monospace"
+                      ],
+                      "headline-md": [
+                              "Inter", "sans-serif"
+                      ],
+                      "body-lg": [
+                              "Inter", "sans-serif"
+                      ]
+              },
+              "fontSize": {
+                      "code-sm": [
+                              "12px",
+                              {
+                                      "lineHeight": "20px",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "body-md": [
+                              "13px",
+                              {
+                                      "lineHeight": "1.5",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "headline-lg": [
+                              "24px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "label-caps": [
+                              "11px",
+                              {
+                                      "lineHeight": "16px",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "headline-md": [
+                              "16px",
+                              {
+                                      "lineHeight": "1.3",
+                                      "letterSpacing": "-0.01em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "body-lg": [
+                              "14px",
+                              {
+                                      "lineHeight": "1.6",
+                                      "fontWeight": "400"
+                              }
+                      ]
+              },
+              boxShadow: {
+                  'subtle': '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+                  'floating': '0 4px 12px 0 rgba(0, 0, 0, 0.08), 0 1px 3px 0 rgba(0, 0, 0, 0.05)',
+              }
+            }
+          }
+        }
+    </script>
+<style>
+        /* Custom Scrollbar for a cleaner look */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #e2dfde;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #c8c6c5;
+        }
+        .dark ::-webkit-scrollbar-thumb {
+            background: #333;
+        }
+        .dark ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        
+        /* Monospace font tweaks */
+        .font-code-sm {
+            font-variant-ligatures: none;
+        }
+    </style>
+</head>
+<body class="bg-surface font-body-md text-ds-gray-900 h-full flex overflow-hidden selection:bg-ds-gray-200 selection:text-ds-gray-900 antialiased">
+<!-- SideNavBar -->
+<nav class="bg-ds-gray-100 border-r border-ds-gray-200 flex flex-col w-[260px] h-full shrink-0 z-20">
+<!-- Logo Header -->
+<div class="p-4 border-b border-ds-gray-200 flex items-center gap-3 shrink-0 h-14">
+<div class="w-6 h-6 rounded bg-ds-gray-900 text-white flex items-center justify-center font-bold text-[12px]">
+            D
+        </div>
+<div class="flex items-baseline gap-2">
+<h1 class="font-headline-md text-ds-gray-900 leading-none tracking-tight">DigitalSofts</h1>
+</div>
+</div>
+<!-- Actions -->
+<div class="p-3 space-y-2 shrink-0">
+<button class="bg-ds-gray-900 text-white font-body-md text-[13px] font-medium px-3 py-1.5 rounded-md hover:bg-ds-gray-800 transition-colors flex items-center justify-center gap-2 w-full shadow-sm">
+<span class="material-symbols-outlined text-[16px]">add</span>
+            New chat
+        </button>
+<button class="bg-white border border-ds-gray-200 text-ds-gray-700 font-body-md text-[13px] font-medium px-3 py-1.5 rounded-md hover:bg-ds-gray-50 transition-colors flex items-center justify-center gap-2 w-full shadow-subtle">
+<span class="material-symbols-outlined text-[16px]">cable</span>
+            Connectors
+        </button>
+<!-- Search -->
+<div class="relative mt-2">
+<span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-ds-gray-400 text-[16px]">search</span>
+<input class="w-full bg-white border border-ds-gray-200 rounded-md py-1.5 pl-8 pr-3 text-[13px] font-body-md focus:outline-none focus:border-ds-gray-400 focus:ring-1 focus:ring-ds-gray-400 transition-all text-ds-gray-900 placeholder:text-ds-gray-400 shadow-subtle" placeholder="Search..." type="text"/>
+</div>
+</div>
+<!-- Chat List -->
+<div class="flex-1 overflow-y-auto p-2 space-y-0.5">
+<p class="font-label-caps text-[10px] text-ds-gray-500 mb-2 px-2 pt-2 uppercase tracking-wider">Recent</p>
+<!-- Active Chat -->
+<a class="group flex items-center gap-2.5 bg-white border border-ds-gray-200 text-ds-gray-900 rounded-md px-2.5 py-1.5 transition-all shadow-subtle" href="#">
+<span class="material-symbols-outlined text-[16px] text-ds-gray-500">chat_bubble</span>
+<span class="font-body-md text-[13px] font-medium truncate flex-1">E-commerce API Integration</span>
+</a>
+<!-- Inactive Chats -->
+<a class="group flex items-center gap-2.5 text-ds-gray-600 hover:text-ds-gray-900 hover:bg-ds-gray-200 px-2.5 py-1.5 rounded-md transition-colors relative border border-transparent" href="#">
+<span class="material-symbols-outlined text-[16px] text-ds-gray-400 group-hover:text-ds-gray-600 transition-colors">description</span>
+<span class="font-body-md text-[13px] truncate flex-1">Database Schema Review</span>
+<button class="opacity-0 group-hover:opacity-100 absolute right-2 text-ds-gray-400 hover:text-error transition-opacity">
+<span class="material-symbols-outlined text-[14px]">delete</span>
+</button>
+</a>
+<a class="group flex items-center gap-2.5 text-ds-gray-600 hover:text-ds-gray-900 hover:bg-ds-gray-200 px-2.5 py-1.5 rounded-md transition-colors relative border border-transparent" href="#">
+<span class="material-symbols-outlined text-[16px] text-ds-gray-400 group-hover:text-ds-gray-600 transition-colors">code</span>
+<span class="font-body-md text-[13px] truncate flex-1">React Component Refactor</span>
+<button class="opacity-0 group-hover:opacity-100 absolute right-2 text-ds-gray-400 hover:text-error transition-opacity">
+<span class="material-symbols-outlined text-[14px]">delete</span>
+</button>
+</a>
+</div>
+<!-- Footer Actions -->
+<div class="p-2 border-t border-ds-gray-200 shrink-0 space-y-0.5 bg-ds-gray-100">
+<a class="flex items-center gap-2.5 text-ds-gray-600 hover:text-ds-gray-900 hover:bg-ds-gray-200 px-2.5 py-1.5 rounded-md transition-colors" href="#">
+<span class="material-symbols-outlined text-[16px]">settings</span>
+<span class="font-body-md text-[13px]">Settings</span>
+</a>
+<a class="flex items-center gap-2.5 text-ds-gray-600 hover:text-ds-gray-900 hover:bg-ds-gray-200 px-2.5 py-1.5 rounded-md transition-colors" href="#">
+<span class="material-symbols-outlined text-[16px]">help</span>
+<span class="font-body-md text-[13px]">Help &amp; Documentation</span>
+</a>
+</div>
+</nav>
+<!-- Main Content Wrapper -->
+<div class="flex-1 flex flex-col h-full w-[calc(100%-260px)] bg-white">
+<!-- TopAppBar -->
+<header class="bg-white border-b border-ds-gray-200 flex justify-between items-center w-full h-14 px-6 shrink-0 z-10">
+<!-- Left: Breadcrumb -->
+<div class="flex items-center gap-2 text-[13px]">
+<span class="text-ds-gray-500 hover:text-ds-gray-900 cursor-pointer transition-colors">Projects</span>
+<span class="material-symbols-outlined text-[14px] text-ds-gray-300">chevron_right</span>
+<span class="text-ds-gray-900 font-medium">E-commerce API Integration</span>
+</div>
+<!-- Center: Navigation Tabs -->
+<nav class="hidden md:flex gap-1 h-full items-end pt-2">
+<a class="text-ds-gray-500 hover:text-ds-gray-900 px-3 pb-2 flex items-center gap-1.5 transition-colors text-[13px] font-medium border-b-2 border-transparent hover:border-ds-gray-300" href="#">
+<span class="material-symbols-outlined text-[16px]">dashboard</span>
+                Overview
+            </a>
+<a class="text-ds-gray-900 px-3 pb-2 flex items-center gap-1.5 transition-colors text-[13px] font-medium border-b-2 border-ds-gray-900" href="#">
+<span class="material-symbols-outlined text-[16px]">terminal</span>
+                Agent
+            </a>
+<a class="text-ds-gray-500 hover:text-ds-gray-900 px-3 pb-2 flex items-center gap-1.5 transition-colors text-[13px] font-medium border-b-2 border-transparent hover:border-ds-gray-300" href="#">
+<span class="material-symbols-outlined text-[16px]">web</span>
+                Preview
+            </a>
+</nav>
+<!-- Right: Actions -->
+<div class="flex items-center gap-3">
+<button class="text-ds-gray-500 hover:text-ds-gray-900 font-body-md text-[13px] font-medium transition-colors">Share</button>
+<button class="bg-ds-gray-900 text-white font-body-md text-[13px] font-medium px-3 py-1.5 rounded-md hover:bg-ds-gray-800 transition-colors shadow-sm">Deploy</button>
+<div class="w-px h-4 bg-ds-gray-200 mx-1"></div>
+<button class="text-ds-gray-400 hover:text-ds-gray-900 transition-colors flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px]">notifications</span>
+</button>
+<button class="text-ds-gray-400 hover:text-ds-gray-900 transition-colors flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px]">account_circle</span>
+</button>
+</div>
+</header>
+<!-- Two-Panel Workspace -->
+<div class="flex-1 flex overflow-hidden">
+<!-- Center: Chat Area Canvas -->
+<main class="flex-1 flex flex-col bg-white relative">
+<!-- Chat History -->
+<div class="flex-1 overflow-y-auto p-6 scroll-smooth flex flex-col gap-8">
+<!-- AI Message -->
+<div class="flex gap-4 max-w-3xl">
+<div class="w-6 h-6 rounded bg-ds-gray-100 text-ds-gray-700 flex items-center justify-center shrink-0 border border-ds-gray-200 shadow-sm mt-1">
+<span class="material-symbols-outlined text-[14px]">memory</span>
+</div>
+<div class="flex flex-col gap-1.5">
+<div class="flex items-center gap-2">
+<span class="font-body-md text-[12px] font-medium text-ds-gray-900">Agent</span>
+<span class="font-body-md text-[12px] text-ds-gray-400">10:42 AM</span>
+</div>
+<div class="text-ds-gray-900 text-[14px] leading-relaxed">
+<p class="mb-4">I can help you build the E-commerce API. To start, let's define the core endpoints for products and orders. Here is a basic Express.js setup to get us going.</p>
+<!-- Code Block -->
+<div class="bg-ds-gray-900 rounded-md overflow-hidden border border-ds-gray-800 shadow-sm my-2">
+<div class="flex justify-between items-center px-3 py-2 bg-ds-gray-900 border-b border-ds-gray-800">
+<span class="font-code-sm text-ds-gray-400">server.js</span>
+<button class="text-ds-gray-400 hover:text-white transition-colors flex items-center justify-center">
+<span class="material-symbols-outlined text-[14px]">content_copy</span>
+</button>
+</div>
+<pre class="p-4 overflow-x-auto m-0 bg-ds-gray-900"><code class="font-code-sm text-ds-gray-200 leading-relaxed"><span class="text-[#c678dd]">const</span> express <span class="text-[#56b6c2]">=</span> <span class="text-[#61afef]">require</span>(<span class="text-[#98c379]">'express'</span>);
+<span class="text-[#c678dd]">const</span> app <span class="text-[#56b6c2]">=</span> <span class="text-[#61afef]">express</span>();
+<span class="text-[#c678dd]">const</span> port <span class="text-[#56b6c2]">=</span> <span class="text-[#d19a66]">3000</span>;
+
+app.<span class="text-[#61afef]">use</span>(express.<span class="text-[#61afef]">json</span>());
+
+app.<span class="text-[#61afef]">get</span>(<span class="text-[#98c379]">'/api/products'</span>, (req, res) <span class="text-[#c678dd]">=&gt;</span> {
+  res.<span class="text-[#61afef]">json</span>({ message: <span class="text-[#98c379]">'List of products'</span> });
+});
+
+app.<span class="text-[#61afef]">listen</span>(port, () <span class="text-[#c678dd]">=&gt;</span> {
+  console.<span class="text-[#61afef]">log</span>(<span class="text-[#98c379]`Server running on port ${port}`&lt;/span&gt;); });&lt;/code&gt;&lt;/pre&gt; &lt;/div&gt; &lt;/div&gt; &lt;/div&gt; &lt;/div&gt; &lt;!-- User Message --&gt; &lt;div class=" flex="" gap-4="" max-w-3xl"="">
+<div class="w-6 h-6 rounded bg-ds-gray-900 text-white flex items-center justify-center shrink-0 shadow-sm mt-1">
+<span class="font-body-md text-[11px] font-medium">U</span>
+</div>
+<div class="flex flex-col gap-1.5">
+<div class="flex items-center gap-2">
+<span class="font-body-md text-[12px] font-medium text-ds-gray-900">You</span>
+<span class="font-body-md text-[12px] text-ds-gray-400">10:45 AM</span>
+</div>
+<div class="text-ds-gray-900 text-[14px] leading-relaxed">
+<p>Looks good. Let's add a MongoDB connection and a Mongoose model for the Products.</p>
+</div>
+</div>
+</span></code></pre></div><code class="font-code-sm text-ds-gray-200 leading-relaxed">
+<!-- AI Status / Thinking -->
+<div class="flex gap-4 max-w-3xl">
+<div class="w-6 h-6 rounded bg-white border border-ds-gray-200 text-ds-gray-400 flex items-center justify-center shrink-0 shadow-sm mt-1">
+<span class="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
+</div>
+<div class="flex flex-col justify-center h-8">
+<span class="font-code-sm text-[12px] text-ds-gray-500 animate-pulse">Generating changes...</span>
+</div>
+</div>
+</code></div><code class="font-code-sm text-ds-gray-200 leading-relaxed">
+<!-- Input Area -->
+<div class="px-6 pb-6 pt-2 bg-white">
+<div class="max-w-3xl mx-auto relative bg-white border border-ds-gray-300 rounded-lg p-2 shadow-sm focus-within:border-ds-gray-900 focus-within:ring-1 focus-within:ring-ds-gray-900 transition-all">
+<textarea class="w-full bg-transparent border-none resize-none focus:ring-0 text-[14px] font-body-md p-2 placeholder:text-ds-gray-400 text-ds-gray-900" placeholder="Ask a question or describe a feature..." rows="1"></textarea>
+<div class="flex justify-between items-center px-1 pb-1 pt-2 border-t border-transparent">
+<div class="flex gap-1 text-ds-gray-500">
+<button class="p-1.5 hover:bg-ds-gray-100 rounded-md transition-colors hover:text-ds-gray-900 flex items-center justify-center">
+<span class="material-symbols-outlined text-[18px]">attach_file</span>
+</button>
+</div>
+<div class="flex items-center gap-2">
+<span class="text-[11px] text-ds-gray-400 font-medium mr-2 hidden sm:inline-block">Press Enter ↵</span>
+<button class="bg-ds-gray-900 text-white p-1.5 rounded-md hover:bg-ds-gray-800 transition-colors flex items-center justify-center shadow-sm">
+<span class="material-symbols-outlined text-[16px]">arrow_upward</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</code></div></div></div></main><code class="font-code-sm text-ds-gray-200 leading-relaxed">
+<!-- Right: Workbench (File Tree, Editor, Terminal) -->
+<aside class="w-[480px] bg-ds-gray-50 border-l border-ds-gray-200 flex flex-col shrink-0">
+<!-- Workbench Tabs -->
+<div class="flex border-b border-ds-gray-200 bg-white px-2 shrink-0 h-10 items-end">
+<button class="px-4 py-2 font-body-md text-[12px] font-medium text-ds-gray-900 border-b-2 border-ds-gray-900">Code</button>
+<button class="px-4 py-2 font-body-md text-[12px] font-medium text-ds-gray-500 hover:text-ds-gray-900 transition-colors border-b-2 border-transparent">Preview</button>
+</div>
+<div class="flex flex-1 overflow-hidden">
+<!-- File Tree -->
+<div class="w-[160px] bg-ds-gray-50 border-r border-ds-gray-200 overflow-y-auto py-2 shrink-0">
+<div class="px-3 py-1 font-label-caps text-[10px] text-ds-gray-500 uppercase tracking-wider">Explorer</div>
+<ul class="mt-1 space-y-px">
+<li>
+<button class="w-full flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-code-sm text-ds-gray-700 hover:bg-ds-gray-200 transition-colors text-left">
+<span class="material-symbols-outlined text-[14px] text-ds-gray-400">folder_open</span>
+                                    src
+                                </button>
+<ul class="space-y-px">
+<li>
+<button class="w-full flex items-center gap-1.5 pl-7 pr-3 py-1 text-[12px] font-code-sm text-ds-gray-900 bg-ds-gray-200 transition-colors text-left relative">
+<div class="absolute left-0 top-0 bottom-0 w-0.5 bg-ds-gray-900"></div>
+<span class="material-symbols-outlined text-[14px] text-ds-gray-500">description</span>
+                                            server.js
+                                        </button>
+</li>
+<li>
+<button class="w-full flex items-center gap-1.5 pl-7 pr-3 py-1 text-[12px] font-code-sm text-ds-gray-600 hover:text-ds-gray-900 hover:bg-ds-gray-200 transition-colors text-left">
+<span class="material-symbols-outlined text-[14px] text-ds-gray-400">description</span>
+                                            models.js
+                                        </button>
+</li>
+</ul>
+</li>
+<li>
+<button class="w-full flex items-center gap-1.5 px-3 py-1 text-[12px] font-code-sm text-ds-gray-600 hover:text-ds-gray-900 hover:bg-ds-gray-200 transition-colors text-left mt-1">
+<span class="material-symbols-outlined text-[14px] text-ds-gray-400">description</span>
+                                    package.json
+                                </button>
+</li>
+</ul>
+</div>
+<!-- Code Editor -->
+<div class="flex-1 bg-white flex flex-col relative min-w-0">
+<!-- Editor Header -->
+<div class="flex items-center justify-between px-3 py-1.5 bg-ds-gray-50 border-b border-ds-gray-200 shrink-0 h-8">
+<div class="flex items-center gap-1.5 min-w-0">
+<span class="font-code-sm text-[11px] text-ds-gray-500 truncate">src/server.js</span>
+</div>
+<div class="flex gap-2 shrink-0">
+<span class="bg-blue-50 text-blue-600 border border-blue-200 font-label-caps text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wider">Modified</span>
+</div>
+</div>
+<!-- Editor Gutter & Content -->
+<div class="flex-1 overflow-auto flex font-code-sm text-[12px] leading-relaxed p-0 bg-white">
+<div class="text-ds-gray-400 text-right pr-3 pl-3 py-2 select-none flex flex-col bg-ds-gray-50 border-r border-ds-gray-100 text-[11px] shrink-0">
+<span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span>
+</div>
+<pre class="text-ds-gray-800 flex-1 overflow-x-auto m-0 p-2"><code class="block"><span class="text-blue-600">const</span> express <span class="text-ds-gray-600">=</span> <span class="text-purple-600">require</span>(<span class="text-green-600">'express'</span>);
+<span class="text-blue-600">const</span> mongoose <span class="text-ds-gray-600">=</span> <span class="text-purple-600">require</span>(<span class="text-green-600">'mongoose'</span>); <span class="text-ds-gray-400 italic">// Added</span>
+<span class="text-blue-600">const</span> app <span class="text-ds-gray-600">=</span> <span class="text-purple-600">express</span>();
+<span class="text-blue-600">const</span> port <span class="text-ds-gray-600">=</span> <span class="text-orange-500">3000</span>;
+
+app.<span class="text-purple-600">use</span>(express.<span class="text-purple-600">json</span>());
+
+<span class="text-ds-gray-400 italic">// Connect to MongoDB</span>
+mongoose.<span class="text-purple-600">connect</span>(<span class="text-green-600">'mongodb://localhost/ecommerce'</span>, {
+  <span class="text-ds-gray-800">useNewUrlParser</span>: <span class="text-blue-600">true</span>,
+  <span class="text-ds-gray-800">useUnifiedTopology</span>: <span class="text-blue-600">true</span>
+});</code></pre>
+</div>
+<!-- Floating Action inside Editor -->
+<div class="absolute bottom-4 right-4 flex gap-2">
+<button class="bg-white text-ds-gray-700 font-body-md text-[12px] font-medium px-3 py-1.5 rounded-md shadow-floating border border-ds-gray-200 hover:border-ds-gray-300 hover:bg-ds-gray-50 transition-all flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[14px]">undo</span> Reject
+                             </button>
+<button class="bg-ds-gray-900 text-white font-body-md text-[12px] font-medium px-3 py-1.5 rounded-md shadow-floating border border-ds-gray-900 hover:bg-ds-gray-800 transition-all flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[14px]">check</span> Accept
+                             </button>
+</div>
+</div>
+</div>
+<!-- Terminal (Bottom Panel) -->
+<div class="h-56 bg-ds-gray-900 flex flex-col shrink-0 rounded-tl-md">
+<div class="flex items-center justify-between px-3 py-1.5 bg-ds-gray-800 border-b border-ds-gray-700 shrink-0 rounded-tl-md">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[14px] text-ds-gray-400">terminal</span>
+<span class="font-code-sm text-[11px] text-ds-gray-300 uppercase tracking-wider">Terminal</span>
+</div>
+<div class="flex gap-1.5">
+<button class="text-ds-gray-400 hover:text-white flex items-center justify-center"><span class="material-symbols-outlined text-[14px]">add</span></button>
+<button class="text-ds-gray-400 hover:text-white flex items-center justify-center"><span class="material-symbols-outlined text-[14px]">close</span></button>
+</div>
+</div>
+<div class="flex-1 p-3 overflow-y-auto font-code-sm text-[12px] text-ds-gray-300 leading-relaxed">
+<div class="flex"><span class="text-green-400 mr-2">➜</span><span class="text-blue-400 mr-2">ecommerce-api</span><span class="text-ds-gray-100">npm run dev</span></div>
+<div class="text-ds-gray-400 mt-1">&gt; ecommerce-api@1.0.0 dev</div>
+<div class="text-ds-gray-400">&gt; nodemon server.js</div>
+<div class="mt-2 text-ds-gray-500">[nodemon] 2.0.22</div>
+<div class="text-ds-gray-500">[nodemon] to restart at any time, enter `rs`</div>
+<div class="text-ds-gray-500">[nodemon] watching path(s): *.*</div>
+<div class="text-green-400 mt-1">✓ Server running on port 3000</div>
+<div class="text-green-400">✓ MongoDB connection established.</div>
+<div class="flex mt-2"><span class="text-green-400 mr-2">➜</span><span class="text-blue-400 mr-2">ecommerce-api</span><span class="text-ds-gray-100 w-2 h-3.5 bg-ds-gray-100 animate-pulse inline-block align-middle"></span></div>
+</div>
+</div>
+</aside>
+</code></div><code class="font-code-sm text-ds-gray-200 leading-relaxed">
+</code></div><code class="font-code-sm text-ds-gray-200 leading-relaxed">
+</code></body></html>

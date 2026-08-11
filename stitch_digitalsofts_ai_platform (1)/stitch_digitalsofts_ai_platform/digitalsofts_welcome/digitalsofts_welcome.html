@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>DigitalSofts AI - Auth</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "surface-container-highest": "#eae1da",
+                      "on-tertiary": "#ffffff",
+                      "surface-bright": "#fff8f4",
+                      "primary": "#a93011",
+                      "on-tertiary-container": "#f9fdff",
+                      "surface-container-low": "#fbf2eb",
+                      "on-tertiary-fixed-variant": "#004e5e",
+                      "primary-fixed": "#ffdad2",
+                      "on-background": "#1f1b17",
+                      "secondary-fixed": "#e5e2e1",
+                      "error-container": "#ffdad6",
+                      "surface-container-lowest": "#ffffff",
+                      "on-primary": "#ffffff",
+                      "surface-container": "#f5ece6",
+                      "surface-variant": "#eae1da",
+                      "tertiary-fixed": "#b1ecff",
+                      "surface": "#fff8f4",
+                      "tertiary-container": "#008098",
+                      "on-secondary-fixed": "#1c1b1b",
+                      "primary-container": "#cb4927",
+                      "on-tertiary-fixed": "#001f27",
+                      "on-primary-container": "#fffbff",
+                      "outline": "#8d716a",
+                      "surface-subtle": "#f5f4f2",
+                      "tertiary": "#006579",
+                      "page-bg": "#faf9f7",
+                      "primary-fixed-dim": "#ffb4a2",
+                      "surface-container-high": "#f0e6e0",
+                      "on-primary-fixed": "#3c0700",
+                      "on-surface-variant": "#59413b",
+                      "text-tertiary": "#9d9893",
+                      "inverse-surface": "#34302b",
+                      "outline-variant": "#e1bfb7",
+                      "on-secondary-fixed-variant": "#474746",
+                      "inverse-primary": "#ffb4a2",
+                      "surface-tint": "#ad3313",
+                      "inverse-on-surface": "#f8efe8",
+                      "secondary": "#5f5e5e",
+                      "on-error": "#ffffff",
+                      "surface-dim": "#e1d8d2",
+                      "background": "#fff8f4",
+                      "secondary-fixed-dim": "#c8c6c5",
+                      "on-secondary": "#ffffff",
+                      "error": "#ba1a1a",
+                      "on-primary-fixed-variant": "#891d00",
+                      "border-warm": "#e8e4df",
+                      "secondary-container": "#e2dfde",
+                      "on-surface": "#1f1b17",
+                      "on-error-container": "#93000a",
+                      "tertiary-fixed-dim": "#66d5f3",
+                      "on-secondary-container": "#636262"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "margin-mobile": "16px",
+                      "container-max": "1440px",
+                      "unit": "4px",
+                      "margin-desktop": "32px",
+                      "gutter": "24px"
+              },
+              "fontFamily": {
+                      "code-sm": [
+                              "JetBrains Mono"
+                      ],
+                      "body-md": [
+                              "Inter"
+                      ],
+                      "headline-lg": [
+                              "Inter"
+                      ],
+                      "label-caps": [
+                              "JetBrains Mono"
+                      ],
+                      "headline-md": [
+                              "Inter"
+                      ],
+                      "body-lg": [
+                              "Inter"
+                      ]
+              },
+              "fontSize": {
+                      "code-sm": [
+                              "13px",
+                              {
+                                      "lineHeight": "20px",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "body-md": [
+                              "14px",
+                              {
+                                      "lineHeight": "1.5",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "headline-lg": [
+                              "32px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "label-caps": [
+                              "11px",
+                              {
+                                      "lineHeight": "16px",
+                                      "letterSpacing": "0.08em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "headline-md": [
+                              "24px",
+                              {
+                                      "lineHeight": "1.3",
+                                      "letterSpacing": "-0.01em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "body-lg": [
+                              "16px",
+                              {
+                                      "lineHeight": "1.6",
+                                      "fontWeight": "400"
+                              }
+                      ]
+              }
+      },
+          },
+        }
+      </script>
+<style>
+        body {
+            background-color: #faf9f7; /* Matching page-bg concept */
+            background-image: radial-gradient(circle at top right, rgba(203, 73, 39, 0.05) 0%, transparent 40%),
+                              radial-gradient(circle at bottom left, rgba(203, 73, 39, 0.03) 0%, transparent 40%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0;
+        }
+
+        .auth-card {
+            box-shadow: 0 10px 40px -10px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.06);
+        }
+        
+        .btn-coral {
+            background-color: #e85d3a; /* High impact coral */
+            color: #ffffff;
+        }
+        .btn-coral:hover {
+            background-color: #d14a28;
+        }
+        
+        .btn-outline-coral {
+            border: 1px solid #e85d3a;
+            color: #e85d3a;
+            background-color: transparent;
+        }
+        .btn-outline-coral:hover {
+            background-color: rgba(232, 93, 58, 0.05);
+        }
+    </style>
+</head>
+<body class="font-body-md text-on-surface antialiased p-4">
+<!-- Auth Card -->
+<main class="auth-card w-full max-w-md bg-surface-container-lowest rounded-2xl border border-border-warm p-8 md:p-12 relative overflow-hidden flex flex-col items-center text-center">
+<!-- Logo Section -->
+<div class="mb-8 flex flex-col items-center">
+<div class="w-16 h-16 rounded-xl bg-surface-bright border border-border-warm flex items-center justify-center mb-4 shadow-sm">
+<!-- Using a material symbol for the "coral icon" -->
+<span class="material-symbols-outlined text-[32px]" data-icon="auto_awesome" data-weight="fill" style="color: #e85d3a;">
+                    auto_awesome
+                </span>
+</div>
+<h1 class="font-headline-lg text-headline-lg text-on-background tracking-tight">
+                DigitalSofts
+            </h1>
+<p class="font-body-lg text-body-lg text-secondary mt-2">
+                Build full-stack apps with AI
+            </p>
+</div>
+<!-- Action Buttons Stacking -->
+<div class="w-full flex flex-col gap-4">
+<button class="btn-coral w-full py-3 px-4 rounded-lg font-label-caps text-label-caps tracking-wider transition-colors duration-200 shadow-sm flex items-center justify-center gap-2">
+                Login
+                <span class="material-symbols-outlined text-[16px]">arrow_forward</span>
+</button>
+<button class="btn-outline-coral w-full py-3 px-4 rounded-lg font-label-caps text-label-caps tracking-wider transition-colors duration-200 flex items-center justify-center">
+                Sign Up
+            </button>
+<!-- Divider -->
+<div class="flex items-center w-full my-2">
+<div class="flex-grow border-t border-border-warm"></div>
+<span class="px-3 font-label-caps text-label-caps text-text-tertiary">or</span>
+<div class="flex-grow border-t border-border-warm"></div>
+</div>
+<button class="w-full py-3 px-4 rounded-lg border border-border-warm bg-transparent text-secondary hover:bg-surface-subtle font-label-caps text-label-caps tracking-wider transition-colors duration-200 flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[16px]">person_outline</span>
+                Continue as Guest
+            </button>
+</div>
+<!-- Footer / Warning -->
+<div class="mt-8 pt-6 border-t border-border-warm w-full text-center">
+<div class="flex items-center justify-center gap-2 text-text-tertiary font-code-sm text-code-sm">
+<span class="material-symbols-outlined text-[16px]">info</span>
+<p>Guest mode does not save your projects</p>
+</div>
+</div>
+</main>
+<!-- Background decorative blur (optional, keeps to "warm minimalism") -->
+<div class="fixed top-0 left-0 w-full h-full pointer-events-none -z-10 overflow-hidden mix-blend-multiply opacity-50">
+<div class="absolute -top-[20%] -right-[10%] w-[500px] h-[500px] rounded-full bg-primary-fixed-dim blur-[120px] opacity-20"></div>
+</div>
+</body></html>

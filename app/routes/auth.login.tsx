@@ -1,0 +1,49 @@
+import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from '@remix-run/cloudflare';
+import { useActionData, useNavigation } from '@remix-run/react';
+import { LoginForm } from '~/components/auth/LoginForm';
+import { getUserByEmail } from '~/lib/db.server';
+import { verifyPassword, signToken } from '~/lib/auth/auth.server';
+import { createUserSession, getUser } from '~/lib/auth/session.server';
+import { redirect } from '@remix-run/cloudflare';
+
+// Already logged in? redirect to home
+export async function loader({ request }: LoaderFunctionArgs) {
+  const user = await getUser(request);
+  if (user) throw redirect('/');
+  return null;
+}
+
+export async function action({ request }: ActionFunctionArgs) {
+  const formData = await request.formData();
+  const email = formData.get('email') as string;
+  const password = formData.get('password') as string;
+
+  // Validation
+  if (!email || !password) {
+    return json({ error: 'Email and password are required' }, { status: 400 });
+  }
+
+  // Check user exists
+  const user = await getUserByEmail(email);
+  if (!user) {
+    return json({ error: 'Invalid email or password' }, { status: 400 });
+  }
+
+  // Check password
+  const isValid = await verifyPassword(password, user.password_hash);
+  if (!isValid) {
+    return json({ error: 'Invalid email or password' }, { status: 400 });
+  }
+
+  // Create session
+  const token = signToken({ userId: user.id, email: user.email, name: user.name });
+  return createUserSession(token, '/');
+}
+
+export default function LoginPage() {
+  const actionData = useActionData<{ error?: string }>();
+  const navigation = useNavigation();
+  const isLoading = navigation.state === 'submitting';
+
+  return <LoginForm error={actionData?.error} isLoading={isLoading} />;
+}

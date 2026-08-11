@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+
+<html class="h-full" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>DigitalSofts Main Chat Screen</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "surface-container-highest": "#eae1da",
+                      "on-tertiary": "#ffffff",
+                      "surface-bright": "#fff8f4",
+                      "primary": "#a93011",
+                      "on-tertiary-container": "#f9fdff",
+                      "surface-container-low": "#fbf2eb",
+                      "on-tertiary-fixed-variant": "#004e5e",
+                      "primary-fixed": "#ffdad2",
+                      "on-background": "#1f1b17",
+                      "secondary-fixed": "#e5e2e1",
+                      "error-container": "#ffdad6",
+                      "surface-container-lowest": "#ffffff",
+                      "on-primary": "#ffffff",
+                      "surface-container": "#f5ece6",
+                      "surface-variant": "#eae1da",
+                      "tertiary-fixed": "#b1ecff",
+                      "surface": "#fff8f4",
+                      "tertiary-container": "#008098",
+                      "on-secondary-fixed": "#1c1b1b",
+                      "primary-container": "#cb4927",
+                      "on-tertiary-fixed": "#001f27",
+                      "on-primary-container": "#fffbff",
+                      "outline": "#8d716a",
+                      "surface-subtle": "#f5f4f2",
+                      "tertiary": "#006579",
+                      "page-bg": "#faf9f7",
+                      "primary-fixed-dim": "#ffb4a2",
+                      "surface-container-high": "#f0e6e0",
+                      "on-primary-fixed": "#3c0700",
+                      "on-surface-variant": "#59413b",
+                      "text-tertiary": "#9d9893",
+                      "inverse-surface": "#34302b",
+                      "outline-variant": "#e1bfb7",
+                      "on-secondary-fixed-variant": "#474746",
+                      "inverse-primary": "#ffb4a2",
+                      "surface-tint": "#ad3313",
+                      "inverse-on-surface": "#f8efe8",
+                      "secondary": "#5f5e5e",
+                      "on-error": "#ffffff",
+                      "surface-dim": "#e1d8d2",
+                      "background": "#fff8f4",
+                      "secondary-fixed-dim": "#c8c6c5",
+                      "on-secondary": "#ffffff",
+                      "error": "#ba1a1a",
+                      "on-primary-fixed-variant": "#891d00",
+                      "border-warm": "#e8e4df",
+                      "secondary-container": "#e2dfde",
+                      "on-surface": "#1f1b17",
+                      "on-error-container": "#93000a",
+                      "tertiary-fixed-dim": "#66d5f3",
+                      "on-secondary-container": "#636262"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "margin-mobile": "16px",
+                      "container-max": "1440px",
+                      "unit": "4px",
+                      "margin-desktop": "32px",
+                      "gutter": "24px"
+              },
+              "fontFamily": {
+                      "code-sm": [
+                              "JetBrains Mono"
+                      ],
+                      "body-md": [
+                              "Inter"
+                      ],
+                      "headline-lg": [
+                              "Inter"
+                      ],
+                      "label-caps": [
+                              "JetBrains Mono"
+                      ],
+                      "headline-md": [
+                              "Inter"
+                      ],
+                      "body-lg": [
+                              "Inter"
+                      ]
+              },
+              "fontSize": {
+                      "code-sm": [
+                              "13px",
+                              {
+                                      "lineHeight": "20px",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "body-md": [
+                              "14px",
+                              {
+                                      "lineHeight": "1.5",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "headline-lg": [
+                              "32px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "label-caps": [
+                              "11px",
+                              {
+                                      "lineHeight": "16px",
+                                      "letterSpacing": "0.08em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "headline-md": [
+                              "24px",
+                              {
+                                      "lineHeight": "1.3",
+                                      "letterSpacing": "-0.01em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "body-lg": [
+                              "16px",
+                              {
+                                      "lineHeight": "1.6",
+                                      "fontWeight": "400"
+                              }
+                      ]
+              }
+            }
+          }
+        }
+    </script>
+</head>
+<body class="bg-page-bg font-body-md text-on-surface h-full flex overflow-hidden selection:bg-primary-container selection:text-on-primary-container">
+<!-- SideNavBar -->
+<nav class="bg-surface dark:bg-surface-dim text-primary dark:text-primary-fixed-dim fixed left-0 top-0 h-full w-[240px] border-r border-border-warm dark:border-outline-variant flex flex-col p-4 gap-4 z-20">
+<!-- Logo Header -->
+<div class="flex items-center gap-3 mb-4 shrink-0">
+<div class="w-8 h-8 rounded bg-primary-container text-on-primary-container flex items-center justify-center font-bold">D</div>
+<div>
+<h1 class="font-headline-md text-headline-md font-bold text-primary dark:text-primary-fixed-dim leading-none">DigitalSofts</h1>
+<p class="font-label-caps text-label-caps text-text-tertiary mt-1">AI Development</p>
+</div>
+</div>
+<!-- Primary Action -->
+<button class="bg-[#1a1a1a] text-[#ffffff] font-body-md text-body-md px-4 py-2 rounded-lg hover:bg-opacity-90 transition-all flex items-center justify-center gap-2 w-full shrink-0 scale-95 active:scale-90 shadow-sm">
+<span class="material-symbols-outlined text-[18px]">add</span>
+            Start new chat
+        </button>
+<!-- Connectors Action -->
+<button class="bg-surface border border-primary text-primary font-body-md text-body-md px-4 py-2 rounded-lg hover:bg-primary-fixed transition-all flex items-center justify-center gap-2 w-full shrink-0 mt-2">
+<span class="material-symbols-outlined text-[18px]">cable</span>
+            Connectors
+        </button>
+<!-- Search -->
+<div class="relative mt-4 shrink-0">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary text-[18px]">search</span>
+<input class="w-full bg-surface-subtle border border-border-warm rounded-md py-2 pl-9 pr-3 text-body-md font-body-md focus:outline-none focus:border-primary transition-colors text-on-surface placeholder:text-text-tertiary" placeholder="Search chats..." type="text"/>
+</div>
+<!-- Chat List (Navigation equivalent) -->
+<div class="flex-1 overflow-y-auto mt-4 pr-1 -mr-1 space-y-1">
+<p class="font-label-caps text-label-caps text-text-tertiary mb-2 pl-3">RECENT</p>
+<!-- Active Chat -->
+<a class="group flex items-center gap-3 bg-primary-container text-on-primary-container rounded-lg px-3 py-2 transition-colors duration-200" href="#">
+<span class="material-symbols-outlined text-[18px]">chat</span>
+<span class="font-body-md text-body-md truncate flex-1">E-commerce API Integration</span>
+</a>
+<!-- Inactive Chats -->
+<a class="group flex items-center gap-3 text-on-surface-variant hover:text-primary hover:bg-surface-container-high px-3 py-2 rounded-lg transition-colors duration-200 relative" href="#">
+<span class="material-symbols-outlined text-[18px]">description</span>
+<span class="font-body-md text-body-md truncate flex-1">Database Schema Review</span>
+<button class="opacity-0 group-hover:opacity-100 absolute right-2 text-text-tertiary hover:text-error transition-opacity">
+<span class="material-symbols-outlined text-[16px]">delete</span>
+</button>
+</a>
+<a class="group flex items-center gap-3 text-on-surface-variant hover:text-primary hover:bg-surface-container-high px-3 py-2 rounded-lg transition-colors duration-200 relative" href="#">
+<span class="material-symbols-outlined text-[18px]">code</span>
+<span class="font-body-md text-body-md truncate flex-1">React Component Refactor</span>
+<button class="opacity-0 group-hover:opacity-100 absolute right-2 text-text-tertiary hover:text-error transition-opacity">
+<span class="material-symbols-outlined text-[16px]">delete</span>
+</button>
+</a>
+</div>
+<!-- Footer Actions -->
+<div class="mt-auto pt-4 border-t border-border-warm shrink-0 space-y-1">
+<a class="flex items-center gap-3 text-on-surface-variant hover:text-primary hover:bg-surface-container-high px-3 py-2 rounded-lg transition-colors duration-200" href="#">
+<span class="material-symbols-outlined text-[18px]">settings</span>
+<span class="font-body-md text-body-md">Settings</span>
+</a>
+<a class="flex items-center gap-3 text-on-surface-variant hover:text-primary hover:bg-surface-container-high px-3 py-2 rounded-lg transition-colors duration-200" href="#">
+<span class="material-symbols-outlined text-[18px]">help_outline</span>
+<span class="font-body-md text-body-md">Help</span>
+</a>
+</div>
+</nav>
+<!-- Main Content Wrapper -->
+<div class="flex-1 flex flex-col ml-[240px] h-full w-[calc(100%-240px)]">
+<!-- TopAppBar -->
+<header class="bg-surface-bright dark:bg-surface-container-lowest text-primary dark:text-primary-fixed-dim docked full-width top-0 border-b border-border-warm dark:border-outline-variant flex justify-between items-center w-full h-16 px-margin-desktop shrink-0 z-10">
+<!-- Left: Breadcrumb / Identity -->
+<div class="flex items-center gap-4">
+<div class="flex items-center text-text-tertiary font-body-md text-body-md">
+<span class="hover:text-primary cursor-pointer transition-colors">Projects</span>
+<span class="material-symbols-outlined text-[16px] mx-1">chevron_right</span>
+<span class="text-on-surface font-semibold">E-commerce API Integration</span>
+</div>
+</div>
+<!-- Center: Navigation Tabs -->
+<nav class="hidden md:flex gap-6 h-full items-end">
+<a class="text-secondary hover:text-primary pb-1 flex items-center gap-2 hover:text-primary-container transition-all" href="#">
+<span class="material-symbols-outlined text-[18px]">dashboard</span>
+<span class="font-label-caps text-label-caps">Overview</span>
+</a>
+<a class="text-primary font-bold border-b-2 border-primary pb-1 flex items-center gap-2 opacity-80 transition-opacity" href="#">
+<span class="material-symbols-outlined text-[18px]" style="font-variation-settings: 'FILL' 1;">smart_toy</span>
+<span class="font-label-caps text-label-caps">Agent</span>
+</a>
+<a class="text-secondary hover:text-primary pb-1 flex items-center gap-2 hover:text-primary-container transition-all" href="#">
+<span class="material-symbols-outlined text-[18px]">terminal</span>
+<span class="font-label-caps text-label-caps">Terminal</span>
+</a>
+<a class="text-secondary hover:text-primary pb-1 flex items-center gap-2 hover:text-primary-container transition-all" href="#">
+<span class="material-symbols-outlined text-[18px]">visibility</span>
+<span class="font-label-caps text-label-caps">Preview</span>
+</a>
+<a class="text-secondary hover:text-primary pb-1 flex items-center gap-2 hover:text-primary-container transition-all" href="#">
+<span class="material-symbols-outlined text-[18px]">settings</span>
+<span class="font-label-caps text-label-caps">Settings</span>
+</a>
+</nav>
+<!-- Right: Actions -->
+<div class="flex items-center gap-4">
+<button class="text-[#6b6560] hover:text-[#e85d3a] font-body-md text-body-md transition-colors">Share</button>
+<button class="bg-[#1a1a1a] text-[#ffffff] font-body-md text-body-md px-4 py-1.5 rounded-lg hover:bg-opacity-90 transition-all shadow-sm">Deploy</button>
+<div class="w-px h-6 bg-border-warm mx-2"></div>
+<button class="text-text-tertiary hover:text-primary transition-colors">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="text-text-tertiary hover:text-primary transition-colors">
+<span class="material-symbols-outlined">account_circle</span>
+</button>
+</div>
+</header>
+<!-- Two-Panel Workspace -->
+<div class="flex-1 flex overflow-hidden">
+<!-- Center: Chat Area Canvas -->
+<main class="flex-1 flex flex-col bg-surface-bright relative">
+<!-- Chat History -->
+<div class="flex-1 overflow-y-auto p-gutter scroll-smooth flex flex-col gap-6">
+<!-- AI Message -->
+<div class="flex gap-4 max-w-3xl">
+<div class="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center shrink-0 border border-border-warm">
+<span class="material-symbols-outlined text-primary text-[18px]">smart_toy</span>
+</div>
+<div class="flex flex-col gap-2">
+<div class="flex items-center gap-2">
+<span class="font-label-caps text-label-caps text-on-surface">DigitalSofts Agent</span>
+<span class="font-label-caps text-label-caps text-text-tertiary">10:42 AM</span>
+</div>
+<div class="bg-surface-subtle p-4 rounded-2xl rounded-tl-sm border border-border-warm text-on-surface">
+<p class="mb-3">I can help you build the E-commerce API. To start, let's define the core endpoints for products and orders. Here is a basic Express.js setup to get us going.</p>
+<!-- Code Block -->
+<div class="bg-[#1a1a1a] rounded-lg overflow-hidden border border-[#333]">
+<div class="flex justify-between items-center px-4 py-2 bg-[#2a2a2a] border-b border-[#333]">
+<span class="font-code-sm text-code-sm text-[#a0a0a0]">server.js</span>
+<button class="text-[#a0a0a0] hover:text-white transition-colors">
+<span class="material-symbols-outlined text-[16px]">content_copy</span>
+</button>
+</div>
+<pre class="p-4 overflow-x-auto"><code class="font-code-sm text-code-sm text-[#e0e0e0]"><span class="text-[#c678dd]">const</span> express <span class="text-[#56b6c2]">=</span> <span class="text-[#61afef]">require</span>(<span class="text-[#98c379]">'express'</span>);
+<span class="text-[#c678dd]">const</span> app <span class="text-[#56b6c2]">=</span> <span class="text-[#61afef]">express</span>();
+<span class="text-[#c678dd]">const</span> port <span class="text-[#56b6c2]">=</span> <span class="text-[#d19a66]">3000</span>;
+
+app.<span class="text-[#61afef]">use</span>(express.<span class="text-[#61afef]">json</span>());
+
+app.<span class="text-[#61afef]">get</span>(<span class="text-[#98c379]">'/api/products'</span>, (req, res) <span class="text-[#c678dd]">=&gt;</span> {
+  res.<span class="text-[#61afef]">json</span>({ message: <span class="text-[#98c379]">'List of products'</span> });
+});
+
+app.<span class="text-[#61afef]">listen</span>(port, () <span class="text-[#c678dd]">=&gt;</span> {
+  console.<span class="text-[#61afef]">log</span>(<span class="text-[#98c379]`Server running on port ${port}`&lt;/span&gt;); });&lt;/code&gt;&lt;/pre&gt; &lt;/div&gt; &lt;/div&gt; &lt;/div&gt; &lt;/div&gt; &lt;!-- User Message --&gt; &lt;div class=" flex="" flex-row-reverse"="" gap-4="" max-w-3xl="" self-end="">
+                        <div class="w-8 h-8 rounded-full bg-[#1a1a1a] flex items-center justify-center shrink-0">
+                            <span class="material-symbols-outlined text-white text-[18px]">person</span>
+                        </div>
+                        <div class="flex flex-col gap-2 items-end">
+                            <div class="flex items-center gap-2">
+                                <span class="font-label-caps text-label-caps text-text-tertiary">10:45 AM</span>
+                                <span class="font-label-caps text-label-caps text-on-surface">You</span>
+                            </div>
+                            <div class="bg-primary-container text-on-primary-container p-4 rounded-2xl rounded-tr-sm">
+                                <p>Looks good. Let's add a MongoDB connection and a Mongoose model for the Products.</p>
+                            </div>
+                        </div>
+                    </span></code></pre></div>
+<!-- AI Status / Thinking -->
+<div class="flex gap-4 max-w-3xl">
+<div class="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center shrink-0 border border-border-warm">
+<span class="material-symbols-outlined text-primary text-[18px] animate-pulse">pending</span>
+</div>
+<div class="flex flex-col justify-center">
+<span class="font-label-caps text-label-caps text-text-tertiary animate-pulse">Generating changes...</span>
+</div>
+</div>
+</div>
+<!-- Input Area -->
+<div class="p-gutter border-t border-border-warm bg-surface-bright pb-8">
+<div class="max-w-3xl mx-auto relative bg-[#ffffff] border border-border-warm rounded-2xl p-2 shadow-sm focus-within:border-primary focus-within:ring-1 focus-within:ring-primary transition-all">
+<textarea class="w-full bg-transparent border-none resize-none focus:ring-0 text-body-md font-body-md p-2 placeholder:text-text-tertiary text-on-surface" placeholder="Ask a question or describe a feature..." rows="2"></textarea>
+<div class="flex justify-between items-center px-2 pb-1">
+<div class="flex gap-2 text-text-tertiary">
+<button class="p-1.5 hover:bg-surface-container-high rounded-md transition-colors hover:text-on-surface">
+<span class="material-symbols-outlined text-[20px]">attach_file</span>
+</button>
+<button class="p-1.5 hover:bg-surface-container-high rounded-md transition-colors hover:text-on-surface">
+<span class="material-symbols-outlined text-[20px]">mic</span>
+</button>
+</div>
+<button class="bg-[#1a1a1a] text-white p-2 rounded-lg hover:bg-opacity-90 transition-colors">
+<span class="material-symbols-outlined text-[20px]">send</span>
+</button>
+</div>
+</div>
+</div>
+</div></div></div></main>
+<!-- Right: Workbench (File Tree, Editor, Preview, Terminal) -->
+<aside class="w-[420px] bg-page-bg border-l border-border-warm flex flex-col shrink-0">
+<!-- Workbench Tabs -->
+<div class="flex border-b border-border-warm bg-surface-bright px-2">
+<button class="px-4 py-3 font-label-caps text-label-caps text-primary border-b-2 border-primary font-bold">Code</button>
+<button class="px-4 py-3 font-label-caps text-label-caps text-text-tertiary hover:text-on-surface transition-colors">Preview</button>
+</div>
+<div class="flex flex-1 overflow-hidden">
+<!-- File Tree -->
+<div class="w-[140px] bg-surface-subtle border-r border-border-warm overflow-y-auto py-2">
+<div class="px-3 py-1 font-label-caps text-label-caps text-text-tertiary flex items-center justify-between group">
+<span>EXPLORER</span>
+</div>
+<ul class="mt-2 space-y-0.5">
+<li>
+<button class="w-full flex items-center gap-2 px-3 py-1 text-sm font-code-sm text-on-surface hover:bg-surface-container-high transition-colors text-left">
+<span class="material-symbols-outlined text-[16px] text-primary">folder</span>
+                                    src
+                                </button>
+<ul class="pl-6 space-y-0.5">
+<li>
+<button class="w-full flex items-center gap-2 px-2 py-1 text-sm font-code-sm text-primary bg-primary-fixed-dim bg-opacity-20 transition-colors text-left border-l-2 border-primary">
+<span class="material-symbols-outlined text-[14px]">description</span>
+                                            server.js
+                                        </button>
+</li>
+<li>
+<button class="w-full flex items-center gap-2 px-2 py-1 text-sm font-code-sm text-text-tertiary hover:text-on-surface hover:bg-surface-container-high transition-colors text-left border-l-2 border-transparent">
+<span class="material-symbols-outlined text-[14px]">description</span>
+                                            models.js
+                                        </button>
+</li>
+</ul>
+</li>
+<li>
+<button class="w-full flex items-center gap-2 px-3 py-1 text-sm font-code-sm text-text-tertiary hover:text-on-surface hover:bg-surface-container-high transition-colors text-left">
+<span class="material-symbols-outlined text-[16px]">description</span>
+                                    package.json
+                                </button>
+</li>
+</ul>
+</div>
+<!-- Code Editor -->
+<div class="flex-1 bg-[#121212] flex flex-col relative">
+<!-- Editor Header -->
+<div class="flex items-center justify-between px-3 py-2 bg-[#1a1a1a] border-b border-[#333]">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[14px] text-text-tertiary">description</span>
+<span class="font-code-sm text-code-sm text-text-tertiary">src/server.js</span>
+</div>
+<div class="flex gap-2">
+<span class="bg-surface-tint text-white font-label-caps text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wider">Modified</span>
+</div>
+</div>
+<!-- Editor Gutter & Content -->
+<div class="flex-1 overflow-auto flex font-code-sm text-code-sm leading-relaxed p-2">
+<div class="text-[#555] text-right pr-4 select-none flex flex-col">
+<span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span>
+</div>
+<pre class="text-[#e0e0e0] flex-1 overflow-x-auto m-0"><code class="block"><span class="text-[#c678dd]">const</span> express <span class="text-[#56b6c2]">=</span> <span class="text-[#61afef]">require</span>(<span class="text-[#98c379]">'express'</span>);
+<span class="text-[#c678dd]">const</span> mongoose <span class="text-[#56b6c2]">=</span> <span class="text-[#61afef]">require</span>(<span class="text-[#98c379]">'mongoose'</span>); <span class="text-[#5c6370]">// Added</span>
+<span class="text-[#c678dd]">const</span> app <span class="text-[#56b6c2]">=</span> <span class="text-[#61afef]">express</span>();
+<span class="text-[#c678dd]">const</span> port <span class="text-[#56b6c2]">=</span> <span class="text-[#d19a66]">3000</span>;
+
+app.<span class="text-[#61afef]">use</span>(express.<span class="text-[#61afef]">json</span>());
+
+<span class="text-[#5c6370]">// Connect to MongoDB</span>
+mongoose.<span class="text-[#61afef]">connect</span>(<span class="text-[#98c379]">'mongodb://localhost/ecommerce'</span>, {
+  <span class="text-[#d19a66]">useNewUrlParser</span>: <span class="text-[#d19a66]">true</span>,
+  <span class="text-[#d19a66]">useUnifiedTopology</span>: <span class="text-[#d19a66]">true</span>
+});</code></pre>
+</div>
+<!-- Floating Action inside Editor -->
+<div class="absolute bottom-4 right-4 flex gap-2">
+<button class="bg-surface text-on-surface font-label-caps text-label-caps px-3 py-1.5 rounded shadow-sm border border-border-warm hover:border-primary transition-colors flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">undo</span> Reject
+                             </button>
+<button class="bg-[#1a1a1a] text-white font-label-caps text-label-caps px-3 py-1.5 rounded shadow-sm hover:bg-opacity-90 transition-colors flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">check</span> Accept
+                             </button>
+</div>
+</div>
+</div>
+<!-- Terminal (Bottom Panel) -->
+<div class="h-48 bg-[#0a0a0a] border-t border-[#333] flex flex-col shrink-0">
+<div class="flex items-center justify-between px-3 py-1 bg-[#121212] border-b border-[#222]">
+<span class="font-label-caps text-label-caps text-[#888]">TERMINAL</span>
+<div class="flex gap-2">
+<button class="text-[#888] hover:text-white"><span class="material-symbols-outlined text-[14px]">add</span></button>
+<button class="text-[#888] hover:text-white"><span class="material-symbols-outlined text-[14px]">close</span></button>
+</div>
+</div>
+<div class="flex-1 p-3 overflow-y-auto font-code-sm text-code-sm text-[#bbb]">
+<div class="flex"><span class="text-[#98c379] mr-2">➜</span><span class="text-[#61afef] mr-2">ecommerce-api</span><span class="text-white">npm run dev</span></div>
+<div class="text-[#d19a66] mt-1">&gt; ecommerce-api@1.0.0 dev</div>
+<div class="text-[#d19a66]">&gt; nodemon server.js</div>
+<div class="mt-2 text-[#888]">[nodemon] 2.0.22</div>
+<div class="text-[#888]">[nodemon] to restart at any time, enter `rs`</div>
+<div class="text-[#888]">[nodemon] watching path(s): *.*</div>
+<div class="text-white mt-1">Server running on port 3000</div>
+<div class="text-white">MongoDB connection established.</div>
+<div class="flex mt-2"><span class="text-[#98c379] mr-2">➜</span><span class="text-[#61afef] mr-2">ecommerce-api</span><span class="text-white animate-pulse">_</span></div>
+</div>
+</div>
+</aside>
+</div>
+</div>
+</body></html>

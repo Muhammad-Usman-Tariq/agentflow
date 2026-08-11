@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>DigitalSofts AI - Agent Progress</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "surface-container-highest": "#eae1da",
+                      "on-tertiary": "#ffffff",
+                      "surface-bright": "#fff8f4",
+                      "primary": "#a93011",
+                      "on-tertiary-container": "#f9fdff",
+                      "surface-container-low": "#fbf2eb",
+                      "on-tertiary-fixed-variant": "#004e5e",
+                      "primary-fixed": "#ffdad2",
+                      "on-background": "#1f1b17",
+                      "secondary-fixed": "#e5e2e1",
+                      "error-container": "#ffdad6",
+                      "surface-container-lowest": "#ffffff",
+                      "on-primary": "#ffffff",
+                      "surface-container": "#f5ece6",
+                      "surface-variant": "#eae1da",
+                      "tertiary-fixed": "#b1ecff",
+                      "surface": "#fff8f4",
+                      "tertiary-container": "#008098",
+                      "on-secondary-fixed": "#1c1b1b",
+                      "primary-container": "#cb4927",
+                      "on-tertiary-fixed": "#001f27",
+                      "on-primary-container": "#fffbff",
+                      "outline": "#8d716a",
+                      "surface-subtle": "#f5f4f2",
+                      "tertiary": "#006579",
+                      "page-bg": "#faf9f7",
+                      "primary-fixed-dim": "#ffb4a2",
+                      "surface-container-high": "#f0e6e0",
+                      "on-primary-fixed": "#3c0700",
+                      "on-surface-variant": "#59413b",
+                      "text-tertiary": "#9d9893",
+                      "inverse-surface": "#34302b",
+                      "outline-variant": "#e1bfb7",
+                      "on-secondary-fixed-variant": "#474746",
+                      "inverse-primary": "#ffb4a2",
+                      "surface-tint": "#ad3313",
+                      "inverse-on-surface": "#f8efe8",
+                      "secondary": "#5f5e5e",
+                      "on-error": "#ffffff",
+                      "surface-dim": "#e1d8d2",
+                      "background": "#fff8f4",
+                      "secondary-fixed-dim": "#c8c6c5",
+                      "on-secondary": "#ffffff",
+                      "error": "#ba1a1a",
+                      "on-primary-fixed-variant": "#891d00",
+                      "border-warm": "#e8e4df",
+                      "secondary-container": "#e2dfde",
+                      "on-surface": "#1f1b17",
+                      "on-error-container": "#93000a",
+                      "tertiary-fixed-dim": "#66d5f3",
+                      "on-secondary-container": "#636262"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "margin-mobile": "16px",
+                      "container-max": "1440px",
+                      "unit": "4px",
+                      "margin-desktop": "32px",
+                      "gutter": "24px"
+              },
+              "fontFamily": {
+                      "code-sm": [
+                              "JetBrains Mono"
+                      ],
+                      "body-md": [
+                              "Inter"
+                      ],
+                      "headline-lg": [
+                              "Inter"
+                      ],
+                      "label-caps": [
+                              "JetBrains Mono"
+                      ],
+                      "headline-md": [
+                              "Inter"
+                      ],
+                      "body-lg": [
+                              "Inter"
+                      ]
+              },
+              "fontSize": {
+                      "code-sm": [
+                              "13px",
+                              {
+                                      "lineHeight": "20px",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "body-md": [
+                              "14px",
+                              {
+                                      "lineHeight": "1.5",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "headline-lg": [
+                              "32px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "label-caps": [
+                              "11px",
+                              {
+                                      "lineHeight": "16px",
+                                      "letterSpacing": "0.08em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "headline-md": [
+                              "24px",
+                              {
+                                      "lineHeight": "1.3",
+                                      "letterSpacing": "-0.01em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "body-lg": [
+                              "16px",
+                              {
+                                      "lineHeight": "1.6",
+                                      "fontWeight": "400"
+                              }
+                      ]
+              }
+            }
+          }
+        }
+    </script>
+<style>
+        .progress-bar-animated {
+            background-size: 200% 100%;
+            animation: move-bg 2s linear infinite;
+            background-image: linear-gradient(90deg, 
+                theme('colors.primary') 0%, 
+                theme('colors.primary-fixed-dim') 50%, 
+                theme('colors.primary') 100%);
+        }
+        
+        @keyframes move-bg {
+            0% { background-position: 100% 0; }
+            100% { background-position: -100% 0; }
+        }
+
+        .pulse-dot {
+            animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
+    </style>
+</head>
+<body class="bg-page-bg min-h-screen flex items-center justify-center p-4">
+<!-- Modal Container -->
+<div class="bg-surface-container-lowest border border-border-warm rounded-[16px] w-full max-w-[600px] shadow-[0_4px_24px_rgba(0,0,0,0.06)] overflow-hidden flex flex-col relative z-10">
+<!-- Header -->
+<div class="px-6 py-5 border-b border-border-warm flex justify-between items-center bg-surface-subtle">
+<h2 class="font-label-caps text-label-caps text-on-surface uppercase tracking-widest flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-primary">psychology</span>
+                AGENT EXECUTION
+            </h2>
+<button class="text-secondary hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-[20px]">close</span>
+</button>
+</div>
+<!-- Agent List -->
+<div class="p-6 flex flex-col gap-3 max-h-[60vh] overflow-y-auto">
+<!-- Row 1: Done -->
+<div class="flex items-center justify-between p-3 rounded-lg border border-border-warm bg-surface-subtle">
+<div class="flex items-center gap-4 w-1/3">
+<span class="material-symbols-outlined text-tertiary">check_circle</span>
+<span class="font-code-sm text-code-sm text-on-surface">Data Ingestion</span>
+</div>
+<div class="w-1/3 flex items-center gap-2">
+<div class="h-1 w-full bg-border-warm rounded-full overflow-hidden">
+<div class="h-full bg-tertiary w-full"></div>
+</div>
+</div>
+<div class="w-1/4 flex justify-end">
+<span class="font-label-caps text-label-caps px-2 py-1 bg-tertiary-fixed text-on-tertiary-fixed rounded-full">DONE</span>
+</div>
+</div>
+<!-- Row 2: Done -->
+<div class="flex items-center justify-between p-3 rounded-lg border border-border-warm bg-surface-subtle">
+<div class="flex items-center gap-4 w-1/3">
+<span class="material-symbols-outlined text-tertiary">check_circle</span>
+<span class="font-code-sm text-code-sm text-on-surface">Schema Mapping</span>
+</div>
+<div class="w-1/3 flex items-center gap-2">
+<div class="h-1 w-full bg-border-warm rounded-full overflow-hidden">
+<div class="h-full bg-tertiary w-full"></div>
+</div>
+</div>
+<div class="w-1/4 flex justify-end">
+<span class="font-label-caps text-label-caps px-2 py-1 bg-tertiary-fixed text-on-tertiary-fixed rounded-full">DONE</span>
+</div>
+</div>
+<!-- Row 3: Done -->
+<div class="flex items-center justify-between p-3 rounded-lg border border-border-warm bg-surface-subtle">
+<div class="flex items-center gap-4 w-1/3">
+<span class="material-symbols-outlined text-tertiary">check_circle</span>
+<span class="font-code-sm text-code-sm text-on-surface">Entity Extraction</span>
+</div>
+<div class="w-1/3 flex items-center gap-2">
+<div class="h-1 w-full bg-border-warm rounded-full overflow-hidden">
+<div class="h-full bg-tertiary w-full"></div>
+</div>
+</div>
+<div class="w-1/4 flex justify-end">
+<span class="font-label-caps text-label-caps px-2 py-1 bg-tertiary-fixed text-on-tertiary-fixed rounded-full">DONE</span>
+</div>
+</div>
+<!-- Row 4: Running -->
+<div class="flex items-center justify-between p-3 rounded-lg border border-primary-fixed shadow-[0_0_0_1px_theme('colors.primary-fixed-dim')] bg-surface-container-lowest">
+<div class="flex items-center gap-4 w-1/3">
+<div class="w-4 h-4 rounded-full bg-primary flex items-center justify-center pulse-dot">
+<div class="w-2 h-2 rounded-full bg-surface-container-lowest"></div>
+</div>
+<span class="font-code-sm text-code-sm text-on-surface font-semibold">Semantic Search</span>
+</div>
+<div class="w-1/3 flex items-center gap-2">
+<div class="h-1 w-full bg-border-warm rounded-full overflow-hidden">
+<div class="h-full bg-primary progress-bar-animated w-3/4 rounded-full"></div>
+</div>
+<span class="font-code-sm text-code-sm text-primary">74%</span>
+</div>
+<div class="w-1/4 flex justify-end">
+<span class="font-label-caps text-label-caps px-2 py-1 bg-primary-fixed text-on-primary-fixed rounded-full flex items-center gap-1">
+<span class="material-symbols-outlined text-[12px]">autorenew</span>
+                        RUNNING
+                    </span>
+</div>
+</div>
+<!-- Row 5: Waiting -->
+<div class="flex items-center justify-between p-3 rounded-lg border border-transparent bg-transparent opacity-60">
+<div class="flex items-center gap-4 w-1/3">
+<span class="material-symbols-outlined text-secondary">pending</span>
+<span class="font-code-sm text-code-sm text-secondary">Synthesis</span>
+</div>
+<div class="w-1/3 flex items-center gap-2">
+<div class="h-1 w-full bg-border-warm rounded-full overflow-hidden">
+<div class="h-full bg-secondary-fixed w-0"></div>
+</div>
+</div>
+<div class="w-1/4 flex justify-end">
+<span class="font-label-caps text-label-caps px-2 py-1 bg-surface-variant text-on-surface-variant rounded-full">WAITING</span>
+</div>
+</div>
+<!-- Row 6: Waiting -->
+<div class="flex items-center justify-between p-3 rounded-lg border border-transparent bg-transparent opacity-60">
+<div class="flex items-center gap-4 w-1/3">
+<span class="material-symbols-outlined text-secondary">pending</span>
+<span class="font-code-sm text-code-sm text-secondary">Formatting Output</span>
+</div>
+<div class="w-1/3 flex items-center gap-2">
+<div class="h-1 w-full bg-border-warm rounded-full overflow-hidden">
+<div class="h-full bg-secondary-fixed w-0"></div>
+</div>
+</div>
+<div class="w-1/4 flex justify-end">
+<span class="font-label-caps text-label-caps px-2 py-1 bg-surface-variant text-on-surface-variant rounded-full">WAITING</span>
+</div>
+</div>
+<!-- Row 7: Waiting -->
+<div class="flex items-center justify-between p-3 rounded-lg border border-transparent bg-transparent opacity-60">
+<div class="flex items-center gap-4 w-1/3">
+<span class="material-symbols-outlined text-secondary">pending</span>
+<span class="font-code-sm text-code-sm text-secondary">Final Validation</span>
+</div>
+<div class="w-1/3 flex items-center gap-2">
+<div class="h-1 w-full bg-border-warm rounded-full overflow-hidden">
+<div class="h-full bg-secondary-fixed w-0"></div>
+</div>
+</div>
+<div class="w-1/4 flex justify-end">
+<span class="font-label-caps text-label-caps px-2 py-1 bg-surface-variant text-on-surface-variant rounded-full">WAITING</span>
+</div>
+</div>
+</div>
+<!-- Footer / Overall Progress -->
+<div class="p-6 border-t border-border-warm bg-surface flex flex-col gap-4">
+<div class="flex justify-between items-end">
+<div class="flex flex-col gap-1">
+<span class="font-body-md text-body-md text-secondary">Overall Progress</span>
+<span class="font-body-sm text-body-sm text-text-tertiary">Executing step 4 of 7</span>
+</div>
+<div class="font-headline-lg text-headline-lg font-black text-on-surface tracking-tighter">
+                    57<span class="text-secondary font-headline-md">%</span>
+</div>
+</div>
+<div class="h-2 w-full bg-border-warm rounded-full overflow-hidden">
+<div class="h-full bg-primary progress-bar-animated w-[57%] rounded-full shadow-[0_0_8px_theme('colors.primary-fixed-dim')]"></div>
+</div>
+</div>
+</div>
+</body></html>

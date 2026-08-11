@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>DigitalSofts Deploy Hub</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "surface-container-highest": "#eae1da",
+                    "on-tertiary": "#ffffff",
+                    "surface-bright": "#fff8f4",
+                    "primary": "#a93011",
+                    "on-tertiary-container": "#f9fdff",
+                    "surface-container-low": "#fbf2eb",
+                    "on-tertiary-fixed-variant": "#004e5e",
+                    "primary-fixed": "#ffdad2",
+                    "on-background": "#1f1b17",
+                    "secondary-fixed": "#e5e2e1",
+                    "error-container": "#ffdad6",
+                    "surface-container-lowest": "#ffffff",
+                    "on-primary": "#ffffff",
+                    "surface-container": "#f5ece6",
+                    "surface-variant": "#eae1da",
+                    "tertiary-fixed": "#b1ecff",
+                    "surface": "#fff8f4",
+                    "tertiary-container": "#008098",
+                    "on-secondary-fixed": "#1c1b1b",
+                    "primary-container": "#cb4927",
+                    "on-tertiary-fixed": "#001f27",
+                    "on-primary-container": "#fffbff",
+                    "outline": "#8d716a",
+                    "surface-subtle": "#f5f4f2",
+                    "tertiary": "#006579",
+                    "page-bg": "#faf9f7",
+                    "primary-fixed-dim": "#ffb4a2",
+                    "surface-container-high": "#f0e6e0",
+                    "on-primary-fixed": "#3c0700",
+                    "on-surface-variant": "#59413b",
+                    "text-tertiary": "#9d9893",
+                    "inverse-surface": "#34302b",
+                    "outline-variant": "#e1bfb7",
+                    "on-secondary-fixed-variant": "#474746",
+                    "inverse-primary": "#ffb4a2",
+                    "surface-tint": "#ad3313",
+                    "inverse-on-surface": "#f8efe8",
+                    "secondary": "#5f5e5e",
+                    "on-error": "#ffffff",
+                    "surface-dim": "#e1d8d2",
+                    "background": "#fff8f4",
+                    "secondary-fixed-dim": "#c8c6c5",
+                    "on-secondary": "#ffffff",
+                    "error": "#ba1a1a",
+                    "on-primary-fixed-variant": "#891d00",
+                    "border-warm": "#e8e4df",
+                    "secondary-container": "#e2dfde",
+                    "on-surface": "#1f1b17",
+                    "on-error-container": "#93000a",
+                    "tertiary-fixed-dim": "#66d5f3",
+                    "on-secondary-container": "#636262"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "margin-mobile": "16px",
+                    "container-max": "1440px",
+                    "unit": "4px",
+                    "margin-desktop": "32px",
+                    "gutter": "24px"
+            },
+            "fontFamily": {
+                    "code-sm": ["JetBrains Mono"],
+                    "body-md": ["Inter"],
+                    "headline-lg": ["Inter"],
+                    "label-caps": ["JetBrains Mono"],
+                    "headline-md": ["Inter"],
+                    "body-lg": ["Inter"]
+            },
+            "fontSize": {
+                    "code-sm": ["13px", {"lineHeight": "20px", "fontWeight": "400"}],
+                    "body-md": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                    "headline-lg": ["32px", {"lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                    "label-caps": ["11px", {"lineHeight": "16px", "letterSpacing": "0.08em", "fontWeight": "600"}],
+                    "headline-md": ["24px", {"lineHeight": "1.3", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                    "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}]
+            }
+          }
+        }
+      }
+    </script>
+<style>
+        body { background-color: #faf9f7; }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+</head>
+<body class="font-body-md text-body-md text-on-surface antialiased min-h-screen flex items-center justify-center p-4">
+<div class="fixed inset-0 z-50 flex items-center justify-center bg-inverse-surface/20 backdrop-blur-sm p-margin-mobile md:p-margin-desktop">
+<div class="w-full max-w-6xl h-full max-h-[85vh] bg-surface-container-lowest rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.06),0_24px_48px_rgba(0,0,0,0.04)] flex flex-col md:flex-row overflow-hidden border border-border-warm relative">
+<button class="absolute top-4 right-4 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-surface hover:bg-surface-container-high transition-colors text-text-tertiary hover:text-on-surface">
+<span class="material-symbols-outlined text-[20px]">close</span>
+</button>
+<aside class="w-full md:w-[280px] bg-surface-subtle border-r border-border-warm flex flex-col flex-shrink-0">
+<div class="p-6 pb-4">
+<h2 class="font-headline-md text-headline-md text-on-background">Deploy Hub</h2>
+<p class="font-body-md text-body-md text-text-tertiary mt-1">Manage deployment targets</p>
+</div>
+<nav class="flex-1 overflow-y-auto py-2 flex flex-col gap-1 px-3">
+<button class="flex items-center gap-3 px-4 py-3 rounded-lg text-left w-full border-l-[3px] border-transparent text-secondary hover:text-on-surface hover:bg-surface-container-low transition-colors group">
+<span class="material-symbols-outlined text-[20px] group-hover:text-primary transition-colors">cloud</span>
+<span class="font-label-caps text-label-caps uppercase">Vercel</span>
+</button>
+<button class="flex items-center gap-3 px-4 py-3 rounded-lg text-left w-full border-l-[3px] border-transparent text-secondary hover:text-on-surface hover:bg-surface-container-low transition-colors group">
+<span class="material-symbols-outlined text-[20px] group-hover:text-primary transition-colors">deployed_code</span>
+<span class="font-label-caps text-label-caps uppercase">Netlify</span>
+</button>
+<button class="flex items-center gap-3 px-4 py-3 rounded-lg text-left w-full border-l-[3px] border-transparent text-secondary hover:text-on-surface hover:bg-surface-container-low transition-colors group">
+<span class="material-symbols-outlined text-[20px] group-hover:text-primary transition-colors">terminal</span>
+<span class="font-label-caps text-label-caps uppercase">GitHub</span>
+</button>
+<button class="flex items-center gap-3 px-4 py-3 rounded-lg text-left w-full border-l-[3px] border-transparent text-secondary hover:text-on-surface hover:bg-surface-container-low transition-colors group">
+<span class="material-symbols-outlined text-[20px] group-hover:text-primary transition-colors">integration_instructions</span>
+<span class="font-label-caps text-label-caps uppercase">GitLab</span>
+</button>
+<button class="flex items-center gap-3 px-4 py-3 rounded-lg text-left w-full border-l-[3px] border-primary bg-surface text-primary transition-colors">
+<span class="material-symbols-outlined text-[20px]" style="font-variation-settings: 'FILL' 1;">share</span>
+<span class="font-label-caps text-label-caps uppercase font-bold">Social Media</span>
+</button>
+</nav>
+</aside>
+<main class="flex-1 flex flex-col h-full bg-surface-container-lowest relative overflow-hidden">
+<div class="flex-1 overflow-y-auto">
+<div class="p-8 md:p-10 max-w-4xl mx-auto flex flex-col gap-10">
+<header>
+<h1 class="font-headline-lg text-headline-lg text-on-background">Social Integrations</h1>
+<p class="font-body-lg text-body-lg text-secondary mt-2 max-w-2xl">Configure automated announcements and release notes across your social platforms upon successful deployment.</p>
+</header>
+<section class="flex flex-col gap-4">
+<h3 class="font-label-caps text-label-caps uppercase text-text-tertiary tracking-wider">Global Settings</h3>
+<div class="bg-surface border border-border-warm rounded-xl p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+<div class="flex flex-col gap-2">
+<label class="font-label-caps text-label-caps uppercase text-secondary">Default Release Template</label>
+<input class="w-full bg-surface-container-lowest border border-border-warm rounded-md px-3 py-2 font-body-md text-body-md text-on-surface focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all" type="text" value="🚀 New release v{{version}} is live! Check out the changes: {{link}}"/>
+</div>
+<div class="flex flex-col gap-2">
+<label class="font-label-caps text-label-caps uppercase text-secondary">Media Assets</label>
+<select class="w-full bg-surface-container-lowest border border-border-warm rounded-md px-3 py-2 font-body-md text-body-md text-on-surface focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all appearance-none cursor-pointer">
+<option>Attach auto-generated OG Image</option>
+<option>Text only</option>
+<option>Custom Image (Prompt)</option>
+</select>
+</div>
+</div>
+</section>
+<section class="flex flex-col gap-4">
+<h3 class="font-label-caps text-label-caps uppercase text-text-tertiary tracking-wider">Platform Connections</h3>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<div class="bg-surface-container-lowest border border-border-warm rounded-xl p-6 flex flex-col gap-6 hover:shadow-[0_1px_3px_rgba(0,0,0,0.06)] transition-shadow">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-full bg-[#1DA1F2]/10 flex items-center justify-center text-[#1DA1F2]">
+<span class="material-symbols-outlined">flutter_dash</span>
+</div>
+<div>
+<h4 class="font-headline-md text-headline-md text-on-surface text-[18px]">X (Twitter)</h4>
+<span class="inline-flex items-center px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant font-label-caps text-label-caps text-[9px] mt-1">Connected</span>
+</div>
+</div>
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-10 h-5 bg-surface-dim peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border-warm after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+</label>
+</div>
+<div class="p-4 bg-surface-subtle rounded-lg border border-border-warm flex flex-col gap-1">
+<span class="font-label-caps text-label-caps uppercase text-text-tertiary">Active Account</span>
+<span class="font-code-sm text-code-sm text-on-surface">@digitalsofts_ai</span>
+</div>
+</div>
+<div class="bg-surface-container-lowest border border-border-warm rounded-xl p-6 flex flex-col gap-6 hover:shadow-[0_1px_3px_rgba(0,0,0,0.06)] transition-shadow">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-full bg-[#0A66C2]/10 flex items-center justify-center text-[#0A66C2]">
+<span class="material-symbols-outlined">work</span>
+</div>
+<div>
+<h4 class="font-headline-md text-headline-md text-on-surface text-[18px]">LinkedIn</h4>
+<span class="inline-flex items-center px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant font-label-caps text-label-caps text-[9px] mt-1">Connected</span>
+</div>
+</div>
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-10 h-5 bg-surface-dim peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border-warm after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+</label>
+</div>
+<div class="p-4 bg-surface-subtle rounded-lg border border-border-warm flex flex-col gap-1">
+<span class="font-label-caps text-label-caps uppercase text-text-tertiary">Active Page</span>
+<span class="font-code-sm text-code-sm text-on-surface">DigitalSofts AI Dev</span>
+</div>
+</div>
+<div class="bg-surface-container-lowest border border-border-warm rounded-xl p-6 flex flex-col gap-6 opacity-70 hover:opacity-100 transition-opacity">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-full bg-[#1877F2]/10 flex items-center justify-center text-[#1877F2]">
+<span class="material-symbols-outlined">groups</span>
+</div>
+<div>
+<h4 class="font-headline-md text-headline-md text-on-surface text-[18px]">Facebook</h4>
+<span class="inline-flex items-center px-2 py-0.5 rounded-full bg-surface-dim text-secondary font-label-caps text-label-caps text-[9px] mt-1">Disconnected</span>
+</div>
+</div>
+<label class="relative inline-flex items-center cursor-pointer opacity-50 pointer-events-none">
+<input class="sr-only peer" type="checkbox"/>
+<div class="w-10 h-5 bg-surface-dim peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border-warm after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+</label>
+</div>
+<button class="w-full py-2 bg-surface text-secondary border border-border-warm rounded-lg font-label-caps text-label-caps uppercase hover:text-on-surface hover:bg-surface-container-high transition-colors">
+                                        Connect Account
+                                    </button>
+</div>
+<div class="bg-surface-container-lowest border border-border-warm rounded-xl p-6 flex flex-col gap-6 opacity-70 hover:opacity-100 transition-opacity">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-full bg-[#E1306C]/10 flex items-center justify-center text-[#E1306C]">
+<span class="material-symbols-outlined">photo_camera</span>
+</div>
+<div>
+<h4 class="font-headline-md text-headline-md text-on-surface text-[18px]">Instagram</h4>
+<span class="inline-flex items-center px-2 py-0.5 rounded-full bg-surface-dim text-secondary font-label-caps text-label-caps text-[9px] mt-1">Disconnected</span>
+</div>
+</div>
+<label class="relative inline-flex items-center cursor-pointer opacity-50 pointer-events-none">
+<input class="sr-only peer" type="checkbox"/>
+<div class="w-10 h-5 bg-surface-dim peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border-warm after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+</label>
+</div>
+<button class="w-full py-2 bg-surface text-secondary border border-border-warm rounded-lg font-label-caps text-label-caps uppercase hover:text-on-surface hover:bg-surface-container-high transition-colors">
+                                        Connect Account
+                                    </button>
+</div>
+</div>
+</section>
+</div>
+</div>
+<div class="p-6 border-t border-border-warm bg-surface flex justify-end gap-4 shrink-0">
+<button class="px-6 py-2.5 bg-transparent text-secondary hover:text-primary transition-colors font-label-caps text-label-caps uppercase tracking-wider rounded-lg">
+                        Cancel
+                    </button>
+<button class="px-8 py-2.5 bg-primary text-on-primary rounded-lg font-label-caps text-label-caps uppercase tracking-wider shadow-sm hover:bg-surface-tint hover:shadow-md transition-all flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">rocket_launch</span>
+                        Deploy
+                    </button>
+</div>
+</main>
+</div>
+</div>
+</body></html>
