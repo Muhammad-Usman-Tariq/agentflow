@@ -64,7 +64,7 @@ export async function streamText(props: {
 
   const envAny = serverEnv as any;
 
-  const currentProvider = envAny?.PROVIDER_NAME || 'OpenRouter';
+  const currentProvider = envAny?.PROVIDER_NAME || envAny?.['PROVIDER_NAME'] || '';
   const currentModel = envAny?.DEFAULT_MODEL || DEFAULT_MODEL;
   const currentApiKey = envAny?.PROVIDER_API_KEY || '';
 
@@ -91,7 +91,7 @@ export async function streamText(props: {
     return newMessage;
   });
 
-  const provider = PROVIDER_LIST.find((p) => p.name === currentProvider) || DEFAULT_PROVIDER;
+  const provider = PROVIDER_LIST.find((p) => p.name.toLowerCase() === currentProvider.toLowerCase()) || DEFAULT_PROVIDER;
 
   const modelDetails = {
     name: currentModel,

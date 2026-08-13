@@ -140,7 +140,7 @@ let debugLogger = null;
 const getDebugLogger = () => {
   if (!debugLogger && typeof window !== "undefined") {
     try {
-      import('./debugLogger-Ch-4DTQp.js').then(({ debugLogger: loggerInstance }) => {
+      import('./debugLogger-oYdQy1K5.js').then(({ debugLogger: loggerInstance }) => {
         debugLogger = loggerInstance;
       }).catch(() => {
       });
@@ -662,7 +662,7 @@ function App() {
       userAgent: navigator.userAgent,
       timestamp: (/* @__PURE__ */ new Date()).toISOString()
     });
-    import('./debugLogger-Ch-4DTQp.js').then(({ debugLogger }) => {
+    import('./debugLogger-oYdQy1K5.js').then(({ debugLogger }) => {
       const status = debugLogger.getStatus();
       logStore.logSystem("Debug logging ready", {
         initialized: status.initialized,
@@ -7054,7 +7054,7 @@ async function streamText(props) {
     designScheme
   } = props;
   const envAny = serverEnv;
-  const currentProvider = envAny?.PROVIDER_NAME || "OpenRouter";
+  const currentProvider = envAny?.PROVIDER_NAME || envAny?.["PROVIDER_NAME"] || "";
   const currentModel = envAny?.DEFAULT_MODEL || DEFAULT_MODEL;
   const currentApiKey = envAny?.PROVIDER_API_KEY || "";
   logger$b.info(`Using Provider: ${currentProvider}, Model: ${currentModel}, Key: ${currentApiKey ? "SET" : "MISSING"}`);
@@ -7077,7 +7077,7 @@ async function streamText(props) {
     }
     return newMessage;
   });
-  const provider = PROVIDER_LIST.find((p) => p.name === currentProvider) || DEFAULT_PROVIDER;
+  const provider = PROVIDER_LIST.find((p) => p.name.toLowerCase() === currentProvider.toLowerCase()) || DEFAULT_PROVIDER;
   const modelDetails = {
     name: currentModel};
   const safeMaxTokens = 8192;
@@ -11931,7 +11931,7 @@ async function newShellProcess(webcontainer, terminal) {
         }
         terminal.write(data);
         try {
-          import('./debugLogger-Ch-4DTQp.js').then(({ captureTerminalLog }) => {
+          import('./debugLogger-oYdQy1K5.js').then(({ captureTerminalLog }) => {
             const cleanData = data.replace(/\x1b\[[0-9;]*[mG]/g, "").trim();
             if (cleanData) {
               captureTerminalLog(cleanData, "output");
@@ -11947,7 +11947,7 @@ async function newShellProcess(webcontainer, terminal) {
     if (isInteractive) {
       input.write(data);
       try {
-        import('./debugLogger-Ch-4DTQp.js').then(({ captureTerminalLog }) => {
+        import('./debugLogger-oYdQy1K5.js').then(({ captureTerminalLog }) => {
           const cleanData = data.replace(/\x1b\[[0-9;]*[A-Z]/g, "").trim();
           if (cleanData && cleanData !== "\r" && cleanData !== "\n") {
             captureTerminalLog(cleanData, "input");
