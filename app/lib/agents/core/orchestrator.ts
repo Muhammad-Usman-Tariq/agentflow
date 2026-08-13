@@ -47,7 +47,7 @@ export class Orchestrator extends AgentBase {
       console.log(`Reasoning: ${plan.reasoning}`);
 
       // Step 2 — Create DB run record
-      const runId = await createAgentRun(chatId, plan.projectType, userRequest);
+      const runId = await createAgentRun(chatId, plan.projectType, userRequest, this.env);
       console.log(`\n💾 Run created — ID: ${runId}`);
 
       // Step 3 — Build agent plan
@@ -95,7 +95,7 @@ export class Orchestrator extends AgentBase {
         );
       }
 
-      await updateRunStatus(runId, 'done');
+      await updateRunStatus(runId, 'done', undefined, this.env);
 
       console.log(`\n✅ Orchestrator done — ${Object.keys(allFiles).length} files generated`);
 

@@ -28,16 +28,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
       async (event) => {
         try {
           await query(
-            `INSERT INTO agent_tasks 
-             (run_id, agent_name, status, input, output, started_at, completed_at)
-             VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`,
-            [
-              event.runId,
-              event.agentName,
-              event.status,
-              JSON.stringify({ message: event.message }),
-              event.data ? JSON.stringify(event.data) : null,
-            ]
+              `INSERT INTO agent_tasks 
+          (run_id, agent_name, status, input, output, started_at, completed_at)
+          VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`,
+         [
+          event.runId,
+          event.agentName,
+          event.status,
+          JSON.stringify({ message: event.message }),
+          event.data ? JSON.stringify(event.data) : null,
+          ],
+         context.cloudflare?.env as any
           );
         } catch (e) {
           // Progress save failure should not stop execution
@@ -70,7 +71,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
 }
 
 // GET — check agent run status
-export async function loader({ request }: any) {
+export async function loader({ request, context }: any) {
   const url = new URL(request.url);
   const runId = url.searchParams.get('runId');
 
@@ -81,7 +82,8 @@ export async function loader({ request }: any) {
   try {
     const runResult = await query(
       'SELECT * FROM agent_runs WHERE id = $1',
-      [runId]
+      [runId],
+      context.cloudflare?.env as any
     );
 
     const tasksResult = await query(
@@ -89,7 +91,8 @@ export async function loader({ request }: any) {
        FROM agent_tasks 
        WHERE run_id = $1 
        ORDER BY started_at ASC`,
-      [runId]
+        [runId],
+        context.cloudflare?.env as any
     );
 
     return json({
