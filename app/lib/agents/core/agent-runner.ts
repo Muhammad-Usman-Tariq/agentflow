@@ -23,15 +23,15 @@ export interface ProgressEvent {
 }
 
 // Get agent instance by name
-function getAgent(name: AgentName) {
+function getAgent(name: AgentName, env?: Record<string, string>) {
   switch (name) {
-    case 'analyst':     return new AnalystAgent();
-    case 'architect':   return new ArchitectAgent();
-    case 'coder':       return new CoderAgent();
-    case 'reviewer':    return new ReviewerAgent();
-    case 'uiux':        return new UIUXAgent();
-    case 'data':        return new DataAgent();
-    case 'integration': return new IntegrationAgent();
+   case 'analyst':     return new AnalystAgent(env);
+    case 'architect':   return new ArchitectAgent(env);
+    case 'coder':       return new CoderAgent(env);
+    case 'reviewer':    return new ReviewerAgent(env);
+    case 'uiux':        return new UIUXAgent(env);
+    case 'data':        return new DataAgent(env);
+    case 'integration': return new IntegrationAgent(env);
     default: throw new Error(`Unknown agent: ${name}`);
   }
 }
@@ -89,7 +89,7 @@ async function runSingleAgent(
   onProgress?: ProgressCallback
 ): Promise<AgentContext> {
 
-  const agent = getAgent(agentName);
+  const agent = getAgent(agentName, plan.env);
 
   // Notify UI — agent started
   onProgress?.({

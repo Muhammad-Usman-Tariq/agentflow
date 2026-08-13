@@ -41,13 +41,13 @@ RESPONSE FORMAT — Return ONLY this JSON:
 `;
 
 export class DataAgent extends AgentBase {
-  constructor() {
-    super({
-      name: 'data',
-      maxRetries: 2,
-      timeoutMs: 45000,
-    });
-  }
+ constructor(env?: Record<string, string>) {
+  super({
+    name: 'data',
+    maxRetries: 3,
+    timeoutMs: 60000,
+  }, env);
+}
 
   async execute(input: AgentInput): Promise<AgentOutput> {
     const requirements = input.context?.requirements;

@@ -4,13 +4,13 @@ import type { ProjectArchitecture } from '../types/project.types';
 import { ARCHITECT_SYSTEM_PROMPT, ARCHITECT_USER_PROMPT } from '../prompts/architect.prompt';
 
 export class ArchitectAgent extends AgentBase {
-  constructor() {
-    super({
-      name: 'architect',
-      maxRetries: 3,
-      timeoutMs: 60000,
-    });
-  }
+  constructor(env?: Record<string, string>) {
+  super({
+    name: 'architect',
+    maxRetries: 3,
+    timeoutMs: 60000,
+  }, env);
+}
 
   async execute(input: AgentInput): Promise<AgentOutput> {
     if (!input.context?.requirements) {

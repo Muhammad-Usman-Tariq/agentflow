@@ -4,13 +4,13 @@ import type { ReviewFeedback } from '../types/project.types';
 import { REVIEWER_SYSTEM_PROMPT, REVIEWER_USER_PROMPT } from '../prompts/reviewer.prompt';
 
 export class ReviewerAgent extends AgentBase {
-  constructor() {
-    super({
-      name: 'reviewer',
-      maxRetries: 2,
-      timeoutMs: 60000,
-    });
-  }
+ constructor(env?: Record<string, string>) {
+  super({
+    name: 'reviewer',
+    maxRetries: 2,
+    timeoutMs: 60000,
+  }, env);
+}
 
   async execute(input: AgentInput): Promise<AgentOutput> {
     const { requirements, generatedCode } = input.context || {};

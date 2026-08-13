@@ -4,13 +4,13 @@ import type { DesignDecisions } from '../types/project.types';
 import { UIUX_SYSTEM_PROMPT, UIUX_USER_PROMPT } from '../prompts/uiux.prompt';
 
 export class UIUXAgent extends AgentBase {
-  constructor() {
-    super({
-      name: 'uiux',
-      maxRetries: 3,
-      timeoutMs: 45000,
-    });
-  }
+  constructor(env?: Record<string, string>) {
+  super({
+    name: 'uiux',
+    maxRetries: 3,
+    timeoutMs: 60000,
+  }, env);
+}
 
   async execute(input: AgentInput): Promise<AgentOutput> {
     if (!input.context?.requirements) {

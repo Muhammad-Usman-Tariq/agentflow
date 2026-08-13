@@ -48,13 +48,13 @@ RESPONSE FORMAT — Return ONLY this JSON:
 `;
 
 export class IntegrationAgent extends AgentBase {
-  constructor() {
-    super({
-      name: 'integration',
-      maxRetries: 2,
-      timeoutMs: 45000,
-    });
-  }
+ constructor(env?: Record<string, string>) {
+  super({
+    name: 'integration',
+    maxRetries: 3,
+    timeoutMs: 60000,
+  }, env);
+}
 
   async execute(input: AgentInput): Promise<AgentOutput> {
     const requirements = input.context?.requirements;

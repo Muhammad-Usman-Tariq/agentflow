@@ -4,13 +4,13 @@ import type { ProjectRequirements } from '../types/project.types';
 import { ANALYST_SYSTEM_PROMPT, ANALYST_USER_PROMPT } from '../prompts/analyst.prompt';
 
 export class AnalystAgent extends AgentBase {
-  constructor() {
-    super({
-      name: 'analyst',
-      maxRetries: 3,
-      timeoutMs: 60000, // 60 seconds
-    });
-  }
+  constructor(env?: Record<string, string>) {
+  super({
+    name: 'analyst',
+    maxRetries: 3,
+    timeoutMs: 60000,
+  }, env);
+}
 
   async execute(input: AgentInput): Promise<AgentOutput> {
     const userMessage = ANALYST_USER_PROMPT(input.userRequest);

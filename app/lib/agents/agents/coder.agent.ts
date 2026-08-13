@@ -3,13 +3,13 @@ import type { AgentInput, AgentOutput } from '../types/agent.types';
 import { CODER_SYSTEM_PROMPT, CODER_USER_PROMPT } from '../prompts/coder.prompt';
 
 export class CoderAgent extends AgentBase {
-  constructor() {
-    super({
-      name: 'coder',
-      maxRetries: 2,
-      timeoutMs: 180000, // 3 minutes — coding takes longest
-    });
-  }
+ constructor(env?: Record<string, string>) {
+  super({
+    name: 'coder',
+    maxRetries: 2,
+    timeoutMs: 120000,
+  }, env);
+}
 
   async execute(input: AgentInput): Promise<AgentOutput> {
     const { requirements, architecture, designDecisions } = input.context || {};
