@@ -1,212 +1,118 @@
 import type { IProviderSetting } from '~/types/model';
 import { BaseProvider } from './base-provider';
-import type { ModelInfo, ProviderInfo } from './types';
-import * as providers from './registry';
-import { createScopedLogger } from '~/utils/logger';
+import {
+  AnthropicProvider,
+  GoogleProvider,
+  GroqProvider,
+  OllamaProvider,
+  OpenRouterProvider,
+  OpenAIProvider,
+} from './registry';
 
-const logger = createScopedLogger('LLMManager');
 export class LLMManager {
   private static _instance: LLMManager;
   private _providers: Map<string, BaseProvider> = new Map();
-  private _modelList: ModelInfo[] = [];
-  private _env: Record<string, string> = {};
 
-  private constructor(_env: Record<string, string>) {
-    this._registerProvidersFromDirectory();
-    this._env = _env;
+  private constructor() {
+    this._registerProviders();
   }
 
-  static getInstance(env: Record<string, string> = {}): LLMManager {
+  static getInstance(): LLMManager {
     if (!LLMManager._instance) {
-      LLMManager._instance = new LLMManager(env);
-    } else if (Object.keys(env).length > 0) {
-      // Update env on subsequent calls so Cloudflare Workers get fresh bindings
-      LLMManager._instance._env = env;
+      LLMManager._instance = new LLMManager();
     }
-
     return LLMManager._instance;
   }
-  get env() {
-    return this._env;
-  }
 
-  private async _registerProvidersFromDirectory() {
-    try {
-      /*
-       * Dynamically import all files from the providers directory
-       * const providerModules = import.meta.glob('./providers/*.ts', { eager: true });
-       */
+  private _registerProviders() {
+    // Register all available providers
+    const allProviders = [
+      new AnthropicProvider(),
+      new GoogleProvider(),
+      new GroqProvider(),
+      new OllamaProvider(),
+      new OpenRouterProvider(),
+      new OpenAIProvider(),
+    ];
 
-      // Look for exported classes that extend BaseProvider
-      for (const exportedItem of Object.values(providers)) {
-        if (typeof exportedItem === 'function' && exportedItem.prototype instanceof BaseProvider) {
-          const provider = new exportedItem();
-
-          try {
-            this.registerProvider(provider);
-          } catch (error: any) {
-            logger.warn('Failed To Register Provider: ', provider.name, 'error:', error.message);
-          }
-        }
-      }
-    } catch (error) {
-      logger.error('Error registering providers:', error);
+    for (const provider of allProviders) {
+      this._providers.set(provider.name.toLowerCase(), provider);
     }
   }
 
-  registerProvider(provider: BaseProvider) {
-    if (this._providers.has(provider.name)) {
-      logger.warn(`Provider ${provider.name} is already registered. Skipping.`);
-      return;
-    }
+  // Get active provider from ENV
+  getActiveProvider(): BaseProvider | undefined {
+    const providerName = (process.env.PROVIDER_NAME || '').toLowerCase();
+    
+    // Known providers
+    const known = this._providers.get(providerName);
+    if (known) return known;
 
-    logger.info('Registering Provider: ', provider.name);
-    this._providers.set(provider.name, provider);
-    this._modelList = [...this._modelList, ...provider.staticModels];
+    // Unknown/Custom provider — use OpenAI compatible
+    // Works with: local models, Chinese models, private servers
+    const openai = this._providers.get('openai');
+    return openai;
   }
 
   getProvider(name: string): BaseProvider | undefined {
-    return this._providers.get(name);
+    return this._providers.get(name.toLowerCase());
   }
 
   getAllProviders(): BaseProvider[] {
     return Array.from(this._providers.values());
   }
 
-  getModelList(): ModelInfo[] {
-    return this._modelList;
+  // Get model instance — works with any provider
+ getModelInstance(options: {
+  model: string;
+  serverEnv?: Record<string, string> | any;
+  apiKeys?: Record<string, string>;
+  providerSettings?: Record<string, IProviderSetting>;
+}) {
+    const env = options.serverEnv || {};
+    const providerName = (env.PROVIDER_NAME || process.env.PROVIDER_NAME || '').toLowerCase();
+    const apiKey = env.PROVIDER_API_KEY || process.env.PROVIDER_API_KEY || '';
+    const model = options.model || env.DEFAULT_MODEL || process.env.DEFAULT_MODEL || '';
+    const baseURL = env.PROVIDER_BASE_URL || process.env.PROVIDER_BASE_URL || '';
+
+    // Try known provider first
+    const provider = this._providers.get(providerName);
+    
+    if (provider) {
+      return provider.getModelInstance({
+               model,
+               serverEnv: env as any,
+               apiKeys: { [provider.name]: apiKey },
+               providerSettings: options.providerSettings,
+                });
+    }
+
+    // Unknown provider — OpenAI compatible (local, Chinese models, private servers)
+    // Just set PROVIDER_BASE_URL and PROVIDER_API_KEY in .env.local
+    const { createOpenAI } = require('@ai-sdk/openai');
+    const client = createOpenAI({
+      baseURL: baseURL || 'http://localhost:11434/v1',
+      apiKey: apiKey || 'dummy',
+    });
+    return client(model);
   }
 
-  async updateModelList(options: {
+  // Get all models for UI display
+  async getModelList(options: {
     apiKeys?: Record<string, string>;
     providerSettings?: Record<string, IProviderSetting>;
     serverEnv?: Record<string, string>;
-  }): Promise<ModelInfo[]> {
-    const { apiKeys, providerSettings, serverEnv } = options;
+  }) {
+    const env = options.serverEnv || {};
+    const providerName = env.PROVIDER_NAME || process.env.PROVIDER_NAME || '';
+    const model = env.DEFAULT_MODEL || process.env.DEFAULT_MODEL || '';
 
-    let enabledProviders = Array.from(this._providers.values()).map((p) => p.name);
-
-    if (providerSettings && Object.keys(providerSettings).length > 0) {
-      enabledProviders = enabledProviders.filter((p) => providerSettings[p].enabled);
-    }
-
-    // Get dynamic models from all providers that support them
-    const dynamicModels = await Promise.all(
-      Array.from(this._providers.values())
-        .filter((provider) => enabledProviders.includes(provider.name))
-        .filter(
-          (provider): provider is BaseProvider & Required<Pick<ProviderInfo, 'getDynamicModels'>> =>
-            !!provider.getDynamicModels,
-        )
-        .map(async (provider) => {
-          const cachedModels = provider.getModelsFromCache(options);
-
-          if (cachedModels) {
-            return cachedModels;
-          }
-
-          const dynamicModels = await provider
-            .getDynamicModels(apiKeys, providerSettings?.[provider.name], serverEnv)
-            .then((models) => {
-              logger.info(`Caching ${models.length} dynamic models for ${provider.name}`);
-              provider.storeDynamicModels(options, models);
-
-              return models;
-            })
-            .catch((err) => {
-              logger.error(`Error getting dynamic models ${provider.name} :`, err);
-              return [];
-            });
-
-          return dynamicModels;
-        }),
-    );
-    const staticModels = Array.from(this._providers.values()).flatMap((p) => p.staticModels || []);
-    const dynamicModelsFlat = dynamicModels.flat();
-    const dynamicModelKeys = dynamicModelsFlat.map((d) => `${d.name}-${d.provider}`);
-    const filteredStaticModels = staticModels.filter((m) => !dynamicModelKeys.includes(`${m.name}-${m.provider}`));
-
-    // Combine static and dynamic models
-    const modelList = [...dynamicModelsFlat, ...filteredStaticModels];
-    modelList.sort((a, b) => a.name.localeCompare(b.name));
-    this._modelList = modelList;
-
-    return modelList;
-  }
-  getStaticModelList() {
-    return [...this._providers.values()].flatMap((p) => p.staticModels || []);
-  }
-  async getModelListFromProvider(
-    providerArg: BaseProvider,
-    options: {
-      apiKeys?: Record<string, string>;
-      providerSettings?: Record<string, IProviderSetting>;
-      serverEnv?: Record<string, string>;
-    },
-  ): Promise<ModelInfo[]> {
-    const provider = this._providers.get(providerArg.name);
-
-    if (!provider) {
-      throw new Error(`Provider ${providerArg.name} not found`);
-    }
-
-    const staticModels = provider.staticModels || [];
-
-    if (!provider.getDynamicModels) {
-      return staticModels;
-    }
-
-    const { apiKeys, providerSettings, serverEnv } = options;
-
-    const cachedModels = provider.getModelsFromCache({
-      apiKeys,
-      providerSettings,
-      serverEnv,
-    });
-
-    if (cachedModels) {
-      logger.info(`Found ${cachedModels.length} cached models for ${provider.name}`);
-      return [...cachedModels, ...staticModels];
-    }
-
-    logger.info(`Getting dynamic models for ${provider.name}`);
-
-    const dynamicModels = await provider
-      .getDynamicModels?.(apiKeys, providerSettings?.[provider.name], serverEnv)
-      .then((models) => {
-        logger.info(`Got ${models.length} dynamic models for ${provider.name}`);
-        provider.storeDynamicModels(options, models);
-
-        return models;
-      })
-      .catch((err) => {
-        logger.error(`Error getting dynamic models ${provider.name} :`, err);
-        return [];
-      });
-    const dynamicModelsName = dynamicModels.map((d) => d.name);
-    const filteredStaticList = staticModels.filter((m) => !dynamicModelsName.includes(m.name));
-    const modelList = [...dynamicModels, ...filteredStaticList];
-    modelList.sort((a, b) => a.name.localeCompare(b.name));
-
-    return modelList;
-  }
-  getStaticModelListFromProvider(providerArg: BaseProvider) {
-    const provider = this._providers.get(providerArg.name);
-
-    if (!provider) {
-      throw new Error(`Provider ${providerArg.name} not found`);
-    }
-
-    return [...(provider.staticModels || [])];
-  }
-
-  getDefaultProvider(): BaseProvider {
-    const firstProvider = this._providers.values().next().value;
-
-    if (!firstProvider) {
-      throw new Error('No providers registered');
-    }
-
-    return firstProvider;
+    // Return just the configured model
+    return [{
+      name: model,
+      label: model,
+      provider: providerName,
+      maxTokenAllowed: 8000,
+    }];
   }
 }

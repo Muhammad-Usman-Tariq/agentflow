@@ -1,47 +1,49 @@
 import AnthropicProvider from './providers/anthropic';
-import CerebrasProvider from './providers/cerebras';
-import CohereProvider from './providers/cohere';
-import DeepseekProvider from './providers/deepseek';
-import FireworksProvider from './providers/fireworks';
 import GoogleProvider from './providers/google';
 import GroqProvider from './providers/groq';
-import HuggingFaceProvider from './providers/huggingface';
-import LMStudioProvider from './providers/lmstudio';
-import MistralProvider from './providers/mistral';
 import OllamaProvider from './providers/ollama';
 import OpenRouterProvider from './providers/open-router';
-import OpenAILikeProvider from './providers/openai-like';
 import OpenAIProvider from './providers/openai';
-import PerplexityProvider from './providers/perplexity';
-import TogetherProvider from './providers/together';
-import XAIProvider from './providers/xai';
-import HyperbolicProvider from './providers/hyperbolic';
-import AmazonBedrockProvider from './providers/amazon-bedrock';
-import GithubProvider from './providers/github';
-import MoonshotProvider from './providers/moonshot';
-import ZaiProvider from './providers/z-ai';
+
+// Dynamic provider — PROVIDER_NAME ENV se auto-detect
+// Koi bhi OpenAI-compatible server kaam karega
+class DynamicProvider {
+  name: string;
+  staticModels: any[];
+  
+  constructor() {
+    this.name = process.env.PROVIDER_NAME || 'CustomProvider';
+    this.staticModels = [
+      {
+        name: process.env.DEFAULT_MODEL || 'default',
+        label: process.env.DEFAULT_MODEL || 'Default Model',
+        provider: this.name,
+        maxTokenAllowed: 8000,
+      }
+    ];
+  }
+
+  getApiKeyLink = '';
+  
+  config = {
+    apiTokenKey: 'PROVIDER_API_KEY',
+  };
+
+  getModelInstance(options: any) {
+    const baseURL = process.env.PROVIDER_BASE_URL || 'http://localhost:11434/v1';
+    const apiKey = process.env.PROVIDER_API_KEY || 'dummy';
+    
+    const { createOpenAI } = require('@ai-sdk/openai');
+    const client = createOpenAI({ baseURL, apiKey });
+    return client(options.model);
+  }
+}
 
 export {
   AnthropicProvider,
-  CerebrasProvider,
-  CohereProvider,
-  DeepseekProvider,
-  FireworksProvider,
   GoogleProvider,
   GroqProvider,
-  HuggingFaceProvider,
-  HyperbolicProvider,
-  MistralProvider,
-  MoonshotProvider,
   OllamaProvider,
-  OpenAIProvider,
   OpenRouterProvider,
-  OpenAILikeProvider,
-  PerplexityProvider,
-  XAIProvider,
-  TogetherProvider,
-  LMStudioProvider,
-  AmazonBedrockProvider,
-  GithubProvider,
-  ZaiProvider,
+  OpenAIProvider,
 };
