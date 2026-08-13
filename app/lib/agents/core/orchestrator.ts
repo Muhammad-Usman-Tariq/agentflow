@@ -18,13 +18,13 @@ interface OrchestratorPlan {
 }
 
 export class Orchestrator extends AgentBase {
-  constructor() {
-    super({
-      name: 'orchestrator',
-      maxRetries: 3,
-      timeoutMs: 30000,
-    });
-  }
+ constructor(env?: Record<string, string>) {
+  super({
+    name: 'orchestrator',
+    maxRetries: 3,
+    timeoutMs: 30000,
+  }, env);
+}
 
   // Main entry point — called from API route
   async start(

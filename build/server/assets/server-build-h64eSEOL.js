@@ -140,7 +140,7 @@ let debugLogger = null;
 const getDebugLogger = () => {
   if (!debugLogger && typeof window !== "undefined") {
     try {
-      import('./debugLogger-BS5rE5fU.js').then(({ debugLogger: loggerInstance }) => {
+      import('./debugLogger-77QuHDLv.js').then(({ debugLogger: loggerInstance }) => {
         debugLogger = loggerInstance;
       }).catch(() => {
       });
@@ -662,7 +662,7 @@ function App() {
       userAgent: navigator.userAgent,
       timestamp: (/* @__PURE__ */ new Date()).toISOString()
     });
-    import('./debugLogger-BS5rE5fU.js').then(({ debugLogger }) => {
+    import('./debugLogger-77QuHDLv.js').then(({ debugLogger }) => {
       const status = debugLogger.getStatus();
       logStore.logSystem("Debug logging ready", {
         initialized: status.initialized,
@@ -8233,8 +8233,10 @@ const route36 = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({
 
 class AgentBase {
   config;
-  constructor(config) {
+  env = {};
+  constructor(config, env) {
     this.config = config;
+    this.env = env || {};
   }
   async run(input) {
     let attempt = 0;
@@ -8273,7 +8275,7 @@ class AgentBase {
   async callLLM(systemPrompt, userMessage, expectJson = false) {
     const providers = this.buildProviderList();
     if (providers.length === 0) {
-      throw new Error("No providers configured in .env.local");
+      throw new Error("No providers configured. Please set PROVIDER_NAME and PROVIDER_API_KEY.");
     }
     let lastError = "";
     for (const provider of providers) {
@@ -8294,25 +8296,30 @@ class AgentBase {
   }
   buildProviderList() {
     const providers = [];
-    if (process.env.PROVIDER_NAME && process.env.PROVIDER_API_KEY) {
+    const e = this.env;
+    const name = e.PROVIDER_NAME || process.env.PROVIDER_NAME;
+    const apiKey = e.PROVIDER_API_KEY || process.env.PROVIDER_API_KEY;
+    const model = e.DEFAULT_MODEL || process.env.DEFAULT_MODEL || "";
+    const baseUrl = e.PROVIDER_BASE_URL || process.env.PROVIDER_BASE_URL;
+    if (name && apiKey) {
       providers.push({
-        name: process.env.PROVIDER_NAME.toLowerCase(),
-        apiKey: process.env.PROVIDER_API_KEY,
-        model: process.env.DEFAULT_MODEL || "",
-        baseUrl: process.env.PROVIDER_BASE_URL
+        name: name.toLowerCase(),
+        apiKey,
+        model,
+        baseUrl
       });
     }
     for (let i = 1; i <= 3; i++) {
-      const name = process.env[`FALLBACK_${i}_NAME`];
-      const apiKey = process.env[`FALLBACK_${i}_API_KEY`];
-      const model = process.env[`FALLBACK_${i}_MODEL`];
-      const baseUrl = process.env[`FALLBACK_${i}_BASE_URL`];
-      if (name && apiKey && model) {
+      const fname = e[`FALLBACK_${i}_NAME`] || process.env[`FALLBACK_${i}_NAME`];
+      const fapiKey = e[`FALLBACK_${i}_API_KEY`] || process.env[`FALLBACK_${i}_API_KEY`];
+      const fmodel = e[`FALLBACK_${i}_MODEL`] || process.env[`FALLBACK_${i}_MODEL`];
+      const fbaseUrl = e[`FALLBACK_${i}_BASE_URL`] || process.env[`FALLBACK_${i}_BASE_URL`];
+      if (fname && fapiKey && fmodel) {
         providers.push({
-          name: name.toLowerCase(),
-          apiKey,
-          model,
-          baseUrl
+          name: fname.toLowerCase(),
+          apiKey: fapiKey,
+          model: fmodel,
+          baseUrl: fbaseUrl
         });
       }
     }
@@ -9077,12 +9084,12 @@ function getDoneMessage(agentName) {
 }
 
 class Orchestrator extends AgentBase {
-  constructor() {
+  constructor(env) {
     super({
       name: "orchestrator",
       maxRetries: 3,
       timeoutMs: 3e4
-    });
+    }, env);
   }
   // Main entry point — called from API route
   async start(userRequest, chatId, onProgress) {
@@ -11932,7 +11939,7 @@ async function newShellProcess(webcontainer, terminal) {
         }
         terminal.write(data);
         try {
-          import('./debugLogger-BS5rE5fU.js').then(({ captureTerminalLog }) => {
+          import('./debugLogger-77QuHDLv.js').then(({ captureTerminalLog }) => {
             const cleanData = data.replace(/\x1b\[[0-9;]*[mG]/g, "").trim();
             if (cleanData) {
               captureTerminalLog(cleanData, "output");
@@ -11948,7 +11955,7 @@ async function newShellProcess(webcontainer, terminal) {
     if (isInteractive) {
       input.write(data);
       try {
-        import('./debugLogger-BS5rE5fU.js').then(({ captureTerminalLog }) => {
+        import('./debugLogger-77QuHDLv.js').then(({ captureTerminalLog }) => {
           const cleanData = data.replace(/\x1b\[[0-9;]*[A-Z]/g, "").trim();
           if (cleanData && cleanData !== "\r" && cleanData !== "\n") {
             captureTerminalLog(cleanData, "input");

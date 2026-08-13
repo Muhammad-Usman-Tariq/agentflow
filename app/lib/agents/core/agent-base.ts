@@ -9,9 +9,11 @@ interface ProviderConfig {
 
 export abstract class AgentBase implements IAgent {
   config: AgentConfig;
+  protected env: Record<string, string> = {};
 
-  constructor(config: AgentConfig) {
+  constructor(config: AgentConfig, env?: Record<string, string>) {
     this.config = config;
+    this.env = env || {};
   }
 
   abstract execute(input: AgentInput): Promise<AgentOutput>;
@@ -65,7 +67,7 @@ export abstract class AgentBase implements IAgent {
     const providers = this.buildProviderList();
 
     if (providers.length === 0) {
-      throw new Error('No providers configured in .env.local');
+      throw new Error('No providers configured. Please set PROVIDER_NAME and PROVIDER_API_KEY.');
     }
 
     let lastError = '';
@@ -92,28 +94,34 @@ export abstract class AgentBase implements IAgent {
 
   private buildProviderList(): ProviderConfig[] {
     const providers: ProviderConfig[] = [];
+    const e = this.env;
 
-    if (process.env.PROVIDER_NAME && process.env.PROVIDER_API_KEY) {
+    const name = e.PROVIDER_NAME || process.env.PROVIDER_NAME;
+    const apiKey = e.PROVIDER_API_KEY || process.env.PROVIDER_API_KEY;
+    const model = e.DEFAULT_MODEL || process.env.DEFAULT_MODEL || '';
+    const baseUrl = e.PROVIDER_BASE_URL || process.env.PROVIDER_BASE_URL;
+
+    if (name && apiKey) {
       providers.push({
-        name: process.env.PROVIDER_NAME.toLowerCase(),
-        apiKey: process.env.PROVIDER_API_KEY,
-        model: process.env.DEFAULT_MODEL || '',
-        baseUrl: process.env.PROVIDER_BASE_URL,
+        name: name.toLowerCase(),
+        apiKey,
+        model,
+        baseUrl,
       });
     }
 
     for (let i = 1; i <= 3; i++) {
-      const name = process.env[`FALLBACK_${i}_NAME`];
-      const apiKey = process.env[`FALLBACK_${i}_API_KEY`];
-      const model = process.env[`FALLBACK_${i}_MODEL`];
-      const baseUrl = process.env[`FALLBACK_${i}_BASE_URL`];
+      const fname = e[`FALLBACK_${i}_NAME`] || process.env[`FALLBACK_${i}_NAME`];
+      const fapiKey = e[`FALLBACK_${i}_API_KEY`] || process.env[`FALLBACK_${i}_API_KEY`];
+      const fmodel = e[`FALLBACK_${i}_MODEL`] || process.env[`FALLBACK_${i}_MODEL`];
+      const fbaseUrl = e[`FALLBACK_${i}_BASE_URL`] || process.env[`FALLBACK_${i}_BASE_URL`];
 
-      if (name && apiKey && model) {
+      if (fname && fapiKey && fmodel) {
         providers.push({
-          name: name.toLowerCase(),
-          apiKey,
-          model,
-          baseUrl,
+          name: fname.toLowerCase(),
+          apiKey: fapiKey,
+          model: fmodel,
+          baseUrl: fbaseUrl,
         });
       }
     }
@@ -204,73 +212,70 @@ export abstract class AgentBase implements IAgent {
     };
     return known[providerName] || 'https://api.openai.com/v1';
   }
+
   protected extractJson(text: string): string {
-  let cleaned = text
-    .replace(/```json\n?/g, '')
-    .replace(/```\n?/g, '')
-    .trim();
+    let cleaned = text
+      .replace(/```json\n?/g, '')
+      .replace(/```\n?/g, '')
+      .trim();
 
-  const firstBrace = cleaned.indexOf('{');
-  const firstBracket = cleaned.indexOf('[');
+    const firstBrace = cleaned.indexOf('{');
+    const firstBracket = cleaned.indexOf('[');
 
-  let start = -1;
-  if (firstBrace === -1) start = firstBracket;
-  else if (firstBracket === -1) start = firstBrace;
-  else start = Math.min(firstBrace, firstBracket);
+    let start = -1;
+    if (firstBrace === -1) start = firstBracket;
+    else if (firstBracket === -1) start = firstBrace;
+    else start = Math.min(firstBrace, firstBracket);
 
-  if (start === -1) throw new Error('No JSON found in LLM response');
+    if (start === -1) throw new Error('No JSON found in LLM response');
 
-  const lastBrace = cleaned.lastIndexOf('}');
-  const lastBracket = cleaned.lastIndexOf(']');
-  const end = Math.max(lastBrace, lastBracket);
+    const lastBrace = cleaned.lastIndexOf('}');
+    const lastBracket = cleaned.lastIndexOf(']');
+    const end = Math.max(lastBrace, lastBracket);
 
-  if (end === -1) throw new Error('Invalid JSON in LLM response');
+    if (end === -1) throw new Error('Invalid JSON in LLM response');
 
-  cleaned = cleaned.substring(start, end + 1);
+    cleaned = cleaned.substring(start, end + 1);
+    cleaned = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 
-  // Fix control characters
-  cleaned = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
-
-  // Try parse directly first
-  try {
-    JSON.parse(cleaned);
-    return cleaned;
-  } catch {
-    // Escape unescaped newlines inside strings
-    cleaned = cleaned.replace(
-      /"((?:[^"\\]|\\.)*)"/g,
-      (_match, p1) => `"${p1
-        .replace(/\n/g, '\\n')
-        .replace(/\r/g, '\\r')
-        .replace(/\t/g, '\\t')
-      }"`
-    );
-    JSON.parse(cleaned); // validate
-    return cleaned;
+    try {
+      JSON.parse(cleaned);
+      return cleaned;
+    } catch {
+      cleaned = cleaned.replace(
+        /"((?:[^"\\]|\\.)*)"/g,
+        (_match, p1) => `"${p1
+          .replace(/\n/g, '\\n')
+          .replace(/\r/g, '\\r')
+          .replace(/\t/g, '\\t')
+        }"`
+      );
+      JSON.parse(cleaned);
+      return cleaned;
+    }
   }
-}
 
-protected parseJson<T>(jsonString: string): T {
-  try {
-    return JSON.parse(jsonString) as T;
-  } catch (e) {
-    throw new Error(`Failed to parse JSON: ${e}`);
+  protected parseJson<T>(jsonString: string): T {
+    try {
+      return JSON.parse(jsonString) as T;
+    } catch (e) {
+      throw new Error(`Failed to parse JSON: ${e}`);
+    }
   }
-}
 
-private withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(`Agent ${this.config.name} timed out after ${ms}ms`));
-    }, ms);
+  private withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(`Agent ${this.config.name} timed out after ${ms}ms`));
+      }, ms);
 
-    promise
-      .then((result) => { clearTimeout(timer); resolve(result); })
-      .catch((err) => { clearTimeout(timer); reject(err); });
-  });
-}
+      promise
+        .then((result) => { clearTimeout(timer); resolve(result); })
+        .catch((err) => { clearTimeout(timer); reject(err); });
+    });
+  }
 
-private sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
 }
