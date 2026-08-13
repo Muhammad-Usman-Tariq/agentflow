@@ -63,6 +63,7 @@ export async function streamText(props: {
   } = props;
 
   const envAny = serverEnv as any;
+  console.log('ENV DUMP:', JSON.stringify(envAny));
 
   const currentProvider = envAny?.PROVIDER_NAME || envAny?.['PROVIDER_NAME'] || '';
   const currentModel = envAny?.DEFAULT_MODEL || DEFAULT_MODEL;

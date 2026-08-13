@@ -140,7 +140,7 @@ let debugLogger = null;
 const getDebugLogger = () => {
   if (!debugLogger && typeof window !== "undefined") {
     try {
-      import('./debugLogger-Diu8PDII.js').then(({ debugLogger: loggerInstance }) => {
+      import('./debugLogger-BS5rE5fU.js').then(({ debugLogger: loggerInstance }) => {
         debugLogger = loggerInstance;
       }).catch(() => {
       });
@@ -662,7 +662,7 @@ function App() {
       userAgent: navigator.userAgent,
       timestamp: (/* @__PURE__ */ new Date()).toISOString()
     });
-    import('./debugLogger-Diu8PDII.js').then(({ debugLogger }) => {
+    import('./debugLogger-BS5rE5fU.js').then(({ debugLogger }) => {
       const status = debugLogger.getStatus();
       logStore.logSystem("Debug logging ready", {
         initialized: status.initialized,
@@ -7054,6 +7054,7 @@ async function streamText(props) {
     designScheme
   } = props;
   const envAny = serverEnv;
+  console.log("ENV DUMP:", JSON.stringify(envAny));
   const currentProvider = envAny?.PROVIDER_NAME || envAny?.["PROVIDER_NAME"] || "";
   const currentModel = envAny?.DEFAULT_MODEL || DEFAULT_MODEL;
   const currentApiKey = envAny?.PROVIDER_API_KEY || "";
@@ -11931,7 +11932,7 @@ async function newShellProcess(webcontainer, terminal) {
         }
         terminal.write(data);
         try {
-          import('./debugLogger-Diu8PDII.js').then(({ captureTerminalLog }) => {
+          import('./debugLogger-BS5rE5fU.js').then(({ captureTerminalLog }) => {
             const cleanData = data.replace(/\x1b\[[0-9;]*[mG]/g, "").trim();
             if (cleanData) {
               captureTerminalLog(cleanData, "output");
@@ -11947,7 +11948,7 @@ async function newShellProcess(webcontainer, terminal) {
     if (isInteractive) {
       input.write(data);
       try {
-        import('./debugLogger-Diu8PDII.js').then(({ captureTerminalLog }) => {
+        import('./debugLogger-BS5rE5fU.js').then(({ captureTerminalLog }) => {
           const cleanData = data.replace(/\x1b\[[0-9;]*[A-Z]/g, "").trim();
           if (cleanData && cleanData !== "\r" && cleanData !== "\n") {
             captureTerminalLog(cleanData, "input");
