@@ -2,7 +2,7 @@ import { json, type ActionFunctionArgs } from '@remix-run/cloudflare';
 import { Orchestrator } from '~/lib/agents/core/orchestrator';
 import { query } from '~/lib/db.server';
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function action({ request, context }: ActionFunctionArgs) {
   const body = await request.json() as any;
   const { userRequest, chatId } = body;
 
@@ -18,7 +18,8 @@ export async function action({ request }: ActionFunctionArgs) {
   console.log(`Request: "${userRequest}"`);
 
   try {
-    const orchestrator = new Orchestrator();
+    console.log('ENV CHECK:', JSON.stringify(context.cloudflare?.env));
+    const orchestrator = new Orchestrator(context.cloudflare?.env as any);
 
     const result = await orchestrator.start(
       userRequest,
