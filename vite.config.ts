@@ -16,6 +16,9 @@ export default defineConfig((config) => {
     define: {
       'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV),
     },
+    server: {
+    allowedHosts: ['agentflow-production-5622.up.railway.app'],
+    },
     build: {
       target: 'esnext',
     },
