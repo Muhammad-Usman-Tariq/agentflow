@@ -19,7 +19,7 @@ export async function getSession(request: Request) {
   return sessionStorage.getSession(request.headers.get('Cookie'));
 }
 
-export async function getUser(request: Request): Promise<JWTPayload | null> {
+export async function getUser(request: Request, env?: any): Promise<JWTPayload | null> {
   const session = await getSession(request);
   const token = session.get('token');
   if (!token) return null;

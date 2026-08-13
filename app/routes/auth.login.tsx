@@ -6,36 +6,33 @@ import { verifyPassword, signToken } from '~/lib/auth/auth.server';
 import { createUserSession, getUser } from '~/lib/auth/session.server';
 import { redirect } from '@remix-run/cloudflare';
 
-// Already logged in? redirect to home
-export async function loader({ request }: LoaderFunctionArgs) {
-  const user = await getUser(request);
+export async function loader({ request, context }: LoaderFunctionArgs) {
+  const user = await getUser(request, context.cloudflare?.env as any);
   if (user) throw redirect('/');
   return null;
 }
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function action({ request, context }: ActionFunctionArgs) {
+  const env = context.cloudflare?.env as any;
+
   const formData = await request.formData();
   const email = formData.get('email') as string;
   const password = formData.get('password') as string;
 
-  // Validation
   if (!email || !password) {
     return json({ error: 'Email and password are required' }, { status: 400 });
   }
 
-  // Check user exists
-  const user = await getUserByEmail(email);
+  const user = await getUserByEmail(email, env);
   if (!user) {
     return json({ error: 'Invalid email or password' }, { status: 400 });
   }
 
-  // Check password
   const isValid = await verifyPassword(password, user.password_hash);
   if (!isValid) {
     return json({ error: 'Invalid email or password' }, { status: 400 });
   }
 
-  // Create session
   const token = signToken({ userId: user.id, email: user.email, name: user.name });
   return createUserSession(token, '/');
 }
