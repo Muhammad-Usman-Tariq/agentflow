@@ -33,7 +33,7 @@ export async function query(text: string, params?: any[], env?: Record<string, s
   const db = await getDb(env);
 
   if (db.type === 'neon') {
-    const result = await db.client(text, params);
+    const result = await db.client.query(text, params); // ✅ .query() use karo
     return { rows: result as any[] };
   } else {
     const client = await db.client.connect();
