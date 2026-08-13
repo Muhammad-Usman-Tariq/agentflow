@@ -57,6 +57,7 @@ export class Orchestrator extends AgentBase {
         userRequest,
         projectType: plan.projectType,
         phases: plan.phases as any,
+        env: this.env,
       };
 
       // Step 4 — Execute all agents

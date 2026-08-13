@@ -44,7 +44,7 @@ export async function runAgentPlan(
 
   let context: AgentContext = {};
 
-  await updateRunStatus(plan.runId, 'running');
+  await updateRunStatus(plan.runId, 'running', undefined, plan.env);
 
   // Execute each phase in order
   for (const phase of plan.phases) {
@@ -77,7 +77,7 @@ export async function runAgentPlan(
     }
   }
 
-  await updateRunStatus(plan.runId, 'done');
+  await updateRunStatus(plan.runId, 'done', undefined, plan.env);
   return context;
 }
 
@@ -110,7 +110,7 @@ async function runSingleAgent(
 
   if (output.success) {
     // Save to DB
-    await saveAgentTask(plan.runId, agentName, 'done', input, output.data);
+    await saveAgentTask(plan.runId, agentName, 'done', input, output.data, undefined, plan.env);
 
     // Update context with this agent's output
     const updatedContext = updateContext(context, agentName, output.data);
@@ -127,7 +127,7 @@ async function runSingleAgent(
     return updatedContext;
   } else {
     // Save failure to DB
-    await saveAgentTask(plan.runId, agentName, 'failed', input, null, output.error);
+    await saveAgentTask(plan.runId, agentName, 'failed', input, null, output.error, plan.env);
 
     // Notify UI — agent failed
     onProgress?.({
