@@ -8,24 +8,29 @@ import {
   OpenRouterProvider,
   OpenAIProvider,
 } from './registry';
+import type { ModelInfo } from './types';
 
 export class LLMManager {
   private static _instance: LLMManager;
   private _providers: Map<string, BaseProvider> = new Map();
+  private _env: Record<string, string> = {};
 
   private constructor() {
     this._registerProviders();
   }
 
-  static getInstance(): LLMManager {
+  // ✅ env accept karta hai ab
+  static getInstance(env?: Record<string, string>): LLMManager {
     if (!LLMManager._instance) {
       LLMManager._instance = new LLMManager();
+    }
+    if (env) {
+      LLMManager._instance._env = env;
     }
     return LLMManager._instance;
   }
 
   private _registerProviders() {
-    // Register all available providers
     const allProviders = [
       new AnthropicProvider(),
       new GoogleProvider(),
@@ -34,24 +39,27 @@ export class LLMManager {
       new OpenRouterProvider(),
       new OpenAIProvider(),
     ];
-
     for (const provider of allProviders) {
       this._providers.set(provider.name.toLowerCase(), provider);
     }
   }
 
-  // Get active provider from ENV
+  // ✅ env se active provider
   getActiveProvider(): BaseProvider | undefined {
-    const providerName = (process.env.PROVIDER_NAME || '').toLowerCase();
-    
-    // Known providers
-    const known = this._providers.get(providerName);
-    if (known) return known;
+    const providerName = (
+      this._env.PROVIDER_NAME ||
+      process.env.PROVIDER_NAME ||
+      ''
+    ).toLowerCase();
+    return this._providers.get(providerName) || this._providers.get('openai');
+  }
 
-    // Unknown/Custom provider — use OpenAI compatible
-    // Works with: local models, Chinese models, private servers
-    const openai = this._providers.get('openai');
-    return openai;
+  // ✅ MISSING — ab exist karta hai
+  getDefaultProvider(): BaseProvider {
+    const active = this.getActiveProvider();
+    if (active) return active;
+    // fallback — pehla provider
+    return Array.from(this._providers.values())[0];
   }
 
   getProvider(name: string): BaseProvider | undefined {
@@ -62,33 +70,72 @@ export class LLMManager {
     return Array.from(this._providers.values());
   }
 
-  // Get model instance — works with any provider
- getModelInstance(options: {
-  model: string;
-  serverEnv?: Record<string, string> | any;
-  apiKeys?: Record<string, string>;
-  providerSettings?: Record<string, IProviderSetting>;
-}) {
-    const env = options.serverEnv || {};
-    const providerName = (env.PROVIDER_NAME || process.env.PROVIDER_NAME || '').toLowerCase();
+  // ✅ MISSING — ab exist karta hai
+  async getModelListFromProvider(
+    provider: BaseProvider,
+    options: {
+      apiKeys?: Record<string, string>;
+      providerSettings?: Record<string, IProviderSetting>;
+      serverEnv?: Record<string, string>;
+    }
+  ): Promise<ModelInfo[]> {
+    const env = options.serverEnv || this._env || {};
+    const model = env.DEFAULT_MODEL || process.env.DEFAULT_MODEL || '';
+
+    return [{
+      name: model || provider.staticModels?.[0]?.name || '',
+      label: model || provider.staticModels?.[0]?.label || '',
+      provider: provider.name,
+      maxTokenAllowed: 8000,
+    }];
+  }
+
+  // ✅ MISSING — ab exist karta hai
+  async updateModelList(options: {
+    apiKeys?: Record<string, string>;
+    providerSettings?: Record<string, IProviderSetting>;
+    serverEnv?: Record<string, string>;
+  }): Promise<ModelInfo[]> {
+    const env = options.serverEnv || this._env || {};
+    const providerName = env.PROVIDER_NAME || process.env.PROVIDER_NAME || '';
+    const model = env.DEFAULT_MODEL || process.env.DEFAULT_MODEL || '';
+
+    return [{
+      name: model,
+      label: model,
+      provider: providerName,
+      maxTokenAllowed: 8000,
+    }];
+  }
+
+  getModelInstance(options: {
+    model: string;
+    serverEnv?: Record<string, string> | any;
+    apiKeys?: Record<string, string>;
+    providerSettings?: Record<string, IProviderSetting>;
+  }) {
+    const env = options.serverEnv || this._env || {};
+    const providerName = (
+      env.PROVIDER_NAME ||
+      process.env.PROVIDER_NAME ||
+      ''
+    ).toLowerCase();
     const apiKey = env.PROVIDER_API_KEY || process.env.PROVIDER_API_KEY || '';
     const model = options.model || env.DEFAULT_MODEL || process.env.DEFAULT_MODEL || '';
     const baseURL = env.PROVIDER_BASE_URL || process.env.PROVIDER_BASE_URL || '';
 
-    // Try known provider first
     const provider = this._providers.get(providerName);
-    
+
     if (provider) {
       return provider.getModelInstance({
-               model,
-               serverEnv: env as any,
-               apiKeys: { [provider.name]: apiKey },
-               providerSettings: options.providerSettings,
-                });
+        model,
+        serverEnv: env as any,
+        apiKeys: { [provider.name]: apiKey },
+        providerSettings: options.providerSettings,
+      });
     }
 
-    // Unknown provider — OpenAI compatible (local, Chinese models, private servers)
-    // Just set PROVIDER_BASE_URL and PROVIDER_API_KEY in .env.local
+    // Unknown provider — OpenAI compatible
     const { createOpenAI } = require('@ai-sdk/openai');
     const client = createOpenAI({
       baseURL: baseURL || 'http://localhost:11434/v1',
@@ -97,22 +144,11 @@ export class LLMManager {
     return client(model);
   }
 
-  // Get all models for UI display
   async getModelList(options: {
     apiKeys?: Record<string, string>;
     providerSettings?: Record<string, IProviderSetting>;
     serverEnv?: Record<string, string>;
   }) {
-    const env = options.serverEnv || {};
-    const providerName = env.PROVIDER_NAME || process.env.PROVIDER_NAME || '';
-    const model = env.DEFAULT_MODEL || process.env.DEFAULT_MODEL || '';
-
-    // Return just the configured model
-    return [{
-      name: model,
-      label: model,
-      provider: providerName,
-      maxTokenAllowed: 8000,
-    }];
+    return this.updateModelList(options);
   }
 }
