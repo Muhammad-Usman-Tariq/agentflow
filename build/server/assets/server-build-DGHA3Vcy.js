@@ -140,7 +140,7 @@ let debugLogger = null;
 const getDebugLogger = () => {
   if (!debugLogger && typeof window !== "undefined") {
     try {
-      import('./debugLogger-DncwSCRN.js').then(({ debugLogger: loggerInstance }) => {
+      import('./debugLogger-Ch-4DTQp.js').then(({ debugLogger: loggerInstance }) => {
         debugLogger = loggerInstance;
       }).catch(() => {
       });
@@ -662,7 +662,7 @@ function App() {
       userAgent: navigator.userAgent,
       timestamp: (/* @__PURE__ */ new Date()).toISOString()
     });
-    import('./debugLogger-DncwSCRN.js').then(({ debugLogger }) => {
+    import('./debugLogger-Ch-4DTQp.js').then(({ debugLogger }) => {
       const status = debugLogger.getStatus();
       logStore.logSystem("Debug logging ready", {
         initialized: status.initialized,
@@ -9791,7 +9791,7 @@ async function chatAction({ context, request }) {
   const { messages, files, promptId, contextOptimization, supabase, chatMode, designScheme, maxLLMSteps } = await request.json();
   const cookieHeader = request.headers.get("Cookie");
   const env = context.cloudflare?.env || {};
-  const providerName = env.PROVIDER_NAME || "OpenRouter";
+  const providerName = env.PROVIDER_NAME || "";
   const apiKeys = {
     [providerName]: env.PROVIDER_API_KEY || ""
   };
@@ -11931,7 +11931,7 @@ async function newShellProcess(webcontainer, terminal) {
         }
         terminal.write(data);
         try {
-          import('./debugLogger-DncwSCRN.js').then(({ captureTerminalLog }) => {
+          import('./debugLogger-Ch-4DTQp.js').then(({ captureTerminalLog }) => {
             const cleanData = data.replace(/\x1b\[[0-9;]*[mG]/g, "").trim();
             if (cleanData) {
               captureTerminalLog(cleanData, "output");
@@ -11947,7 +11947,7 @@ async function newShellProcess(webcontainer, terminal) {
     if (isInteractive) {
       input.write(data);
       try {
-        import('./debugLogger-DncwSCRN.js').then(({ captureTerminalLog }) => {
+        import('./debugLogger-Ch-4DTQp.js').then(({ captureTerminalLog }) => {
           const cleanData = data.replace(/\x1b\[[0-9;]*[A-Z]/g, "").trim();
           if (cleanData && cleanData !== "\r" && cleanData !== "\n") {
             captureTerminalLog(cleanData, "input");

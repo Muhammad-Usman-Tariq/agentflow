@@ -69,7 +69,7 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
 
   const cookieHeader = request.headers.get('Cookie');
   const env = (context.cloudflare?.env as unknown) as Record<string, string> || {};
-const providerName = env.PROVIDER_NAME || 'OpenRouter';
+const providerName = env.PROVIDER_NAME || '';
 const apiKeys: Record<string, string> = {
   [providerName]: env.PROVIDER_API_KEY || '',
 };
