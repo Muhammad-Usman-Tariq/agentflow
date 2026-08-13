@@ -6,10 +6,7 @@ export const WORK_DIR = `/home/${WORK_DIR_NAME}`;
 export const MODIFICATIONS_TAG_NAME = 'bolt_file_modifications';
 export const MODEL_REGEX = /^\[Model: (.*?)\]\n\n/;
 export const PROVIDER_REGEX = /\[Provider: (.*?)\]\n\n/;
-
-// ✅ Hardcoded Claude hataya — env se aaye ga, fallback empty string
 export const DEFAULT_MODEL = process.env.DEFAULT_MODEL || '';
-
 export const PROMPT_COOKIE_KEY = 'cachedPrompt';
 export const TOOL_EXECUTION_APPROVAL = {
   APPROVE: 'Yes, approved.',
@@ -22,8 +19,6 @@ export const TOOL_EXECUTION_ERROR = 'Error: An error occured while calling tool'
 const llmManager = LLMManager.getInstance();
 
 export const PROVIDER_LIST = llmManager.getAllProviders();
-
-// ✅ getActiveProvider() use karo jo env.PROVIDER_NAME se match karta hai
 export const DEFAULT_PROVIDER = llmManager.getActiveProvider() || llmManager.getAllProviders()[0];
 
 export const providerBaseUrlEnvKeys: Record<string, { baseUrlKey?: string; apiTokenKey?: string }> = {};
@@ -34,4 +29,38 @@ PROVIDER_LIST.forEach((provider) => {
   };
 });
 
-// ... baqi STARTER_TEMPLATES same rahega
+// ✅ STARTER_TEMPLATES — wapis add kiya
+export const STARTER_TEMPLATES: Template[] = [
+  {
+    name: 'Expo App',
+    label: 'Expo App',
+    description: 'Expo starter template for building cross-platform mobile apps',
+    githubRepo: 'xKevIsDev/bolt-expo-template',
+    tags: ['mobile', 'expo', 'mobile-app', 'android', 'iphone'],
+    icon: 'i-bolt:expo',
+  },
+  {
+    name: 'Vite React',
+    label: 'React + Vite + typescript',
+    description: 'React starter template powered by Vite for fast development experience',
+    githubRepo: 'xKevIsDev/bolt-vite-react-ts-template',
+    tags: ['react', 'vite', 'frontend', 'website', 'app'],
+    icon: 'i-bolt:react',
+  },
+  {
+    name: 'NextJS Shadcn',
+    label: 'Next.js with shadcn/ui',
+    description: 'Next.js starter fullstack template integrated with shadcn/ui components',
+    githubRepo: 'xKevIsDev/bolt-nextjs-shadcn-template',
+    tags: ['nextjs', 'react', 'typescript', 'shadcn', 'tailwind'],
+    icon: 'i-bolt:nextjs',
+  },
+  {
+    name: 'Vue',
+    label: 'Vue.js',
+    description: 'Vue.js starter template with modern tooling and best practices',
+    githubRepo: 'xKevIsDev/bolt-vue-template',
+    tags: ['vue', 'typescript', 'frontend'],
+    icon: 'i-bolt:vue',
+  },
+];
