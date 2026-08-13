@@ -1,4 +1,4 @@
-import { l as logger, D as DEFAULT_MODEL, P as PROVIDER_LIST } from './server-build-DMKzWvaX.js';
+import { l as logger, D as DEFAULT_MODEL, P as PROVIDER_LIST } from './server-build-xzgDgw3a.js';
 import 'react/jsx-runtime';
 import '@remix-run/react';
 import 'isbot';
@@ -60,7 +60,7 @@ let logStore = null;
 const getLogStore = () => {
   if (!logStore && typeof window !== "undefined") {
     try {
-      import('./server-build-DMKzWvaX.js').then(n => n.c).then(({ logStore: store }) => {
+      import('./server-build-xzgDgw3a.js').then(n => n.c).then(({ logStore: store }) => {
         logStore = store;
       }).catch(() => {
       });
@@ -531,7 +531,7 @@ class DebugLogger {
       const store = getLogStore();
       if (!store) {
         try {
-          const { logStore: storeModule } = await import('./server-build-DMKzWvaX.js').then(n => n.c);
+          const { logStore: storeModule } = await import('./server-build-xzgDgw3a.js').then(n => n.c);
           logStore = storeModule;
           return this._getLogStoreLogs();
         } catch {

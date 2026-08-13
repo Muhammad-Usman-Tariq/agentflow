@@ -124,7 +124,7 @@ const apiKeys: Record<string, string> = {
 
           summary = await createSummary({
             messages: [...processedMessages],
-            env: { ...context.cloudflare?.env, ...(process.env as any) } as any,
+            env: context.cloudflare?.env as any,
             apiKeys,
             providerSettings,
             promptId,
@@ -166,7 +166,7 @@ const apiKeys: Record<string, string> = {
           console.log(`Messages count: ${processedMessages.length}`);
           filteredFiles = await selectContext({
             messages: [...processedMessages],
-            env: { ...context.cloudflare?.env, ...(process.env as any) } as any,
+            env: context.cloudflare?.env as any,
             apiKeys,
             files,
             providerSettings,
@@ -272,7 +272,7 @@ const apiKeys: Record<string, string> = {
 
             const result = await streamText({
               messages: [...processedMessages],
-              env: { ...context.cloudflare?.env, ...(process.env as any) } as any,
+              env: context.cloudflare?.env as any,
               options,
               apiKeys,
               files,
@@ -313,7 +313,7 @@ const apiKeys: Record<string, string> = {
 
         const result = await streamText({
           messages: [...processedMessages],
-          env: { ...context.cloudflare?.env, ...(process.env as any) } as any,
+          env: context.cloudflare?.env as any,
           options,
           apiKeys,
           files,
