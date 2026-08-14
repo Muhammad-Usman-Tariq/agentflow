@@ -1,23 +1,31 @@
 import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from '@remix-run/cloudflare';
-import { saveProject, getAllProjects, getProject, query, saveProjectForUser, getAllProjectsForUser, getProjectForUser, deleteProjectForUser } from '~/lib/db.server';
-import { getUser } from '~/lib/auth/session.server';
+import { saveProject, getAllProjects, getProject, query, saveProjectForUser, getAllProjectsForUser, deleteProjectForUser } from '~/lib/db.server';
+import { verifyToken } from '~/lib/auth/auth.server';
+import { sessionStorage } from '~/lib/auth/session.server';
+
+async function getUserFromRequest(request: Request) {
+  try {
+    const session = await sessionStorage.getSession(request.headers.get('Cookie'));
+    const token = session.get('token');
+    return token ? verifyToken(token) : null;
+  } catch {
+    return null;
+  }
+}
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.cloudflare?.env as any;
-  const user = await getUser(request, env);
+  const user = await getUserFromRequest(request);
   const url = new URL(request.url);
   const id = url.searchParams.get('id');
 
   if (id) {
-    // ✅ User logged in — us ka project
-    // ✅ Guest — bhi dekh sake apna project by ID
     const project = await getProject(id, env);
     return json({ project });
   }
 
-  // ✅ Sidebar list — sirf logged in user ke projects
   if (!user) {
-    return json({ projects: [] }); // Guest ko koi list nahi
+    return json({ projects: [] });
   }
 
   const projects = await getAllProjectsForUser(user.userId, env);
@@ -26,7 +34,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
 export async function action({ request, context }: ActionFunctionArgs) {
   const env = context.cloudflare?.env as any;
-  const user = await getUser(request, env);
+  const user = await getUserFromRequest(request);
 
   if (request.method === 'DELETE') {
     const url = new URL(request.url);
@@ -45,13 +53,11 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const body = await request.json() as { id: string; title: string; messages: any[]; files: any };
   const { id, title, messages, files } = body;
 
-  // ✅ User logged in — user_id ke saath save
   if (user) {
     const project = await saveProjectForUser(id, title, messages, files, user.userId, env);
     return json({ project });
   }
 
-  // Guest — bina user_id ke save
   const project = await saveProject(id, title, messages, files, env);
   return json({ project });
 }
