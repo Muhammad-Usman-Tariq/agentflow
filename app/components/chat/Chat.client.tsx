@@ -442,15 +442,18 @@ export const ChatImpl = memo(
               );
             }
           } catch (e) {
-            console.error('Failed to start dev server:', e);
-          }
-        }
-      } catch (e) {
-        console.error('Agent error:', e);
-      } finally {
-        setAgentRunning(false);
+        console.error('Failed to start dev server:', e);
       }
-    };
+
+      // ✅ History save karo agent ke baad
+      await storeMessageHistory(messages);
+    }
+  } catch (e) {
+    console.error('Agent error:', e);
+  } finally {
+    setAgentRunning(false);
+  }
+};
 
     const sendMessage = async (_event: React.UIEvent, messageInput?: string) => {
       const messageContent = messageInput || input;
@@ -468,7 +471,11 @@ export const ChatImpl = memo(
         const elementInfo = `<div class=\"__boltSelectedElement__\" data-element='${JSON.stringify(selectedElement)}'>${JSON.stringify(`${selectedElement.displayText}`)}</div>`;
         finalMessageContent = messageContent + elementInfo;
       }
-
+        append({
+        role: 'user',
+        content: messageContent,
+        parts: createMessageParts(messageContent, imageDataList), 
+        });
       // Run agent in background
       runAgent(messageContent);
 

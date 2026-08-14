@@ -2,7 +2,8 @@ import type { LoaderFunctionArgs } from '@remix-run/cloudflare';
 import { query } from '~/lib/db.server';
 
 // Server Sent Events — real time progress streaming to UI
-export async function loader({ request }: LoaderFunctionArgs) {
+export async function loader({ request, context }: LoaderFunctionArgs) {
+  const env = context.cloudflare?.env as any;
   const url = new URL(request.url);
   const runId = url.searchParams.get('runId');
 
@@ -30,7 +31,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
           // Get run status
           const runResult = await query(
             'SELECT status, project_type FROM agent_runs WHERE id = $1',
-            [runId]
+            [runId],
+             env 
           );
 
           const run = runResult.rows[0];
@@ -46,7 +48,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
              FROM agent_tasks
              WHERE run_id = $1
              ORDER BY completed_at ASC`,
-            [runId]
+            [runId],
+             env
           );
 
           const tasks = tasksResult.rows;
