@@ -35,7 +35,7 @@ export function Menu() {
 
   useEffect(() => {
     loadEntries();
-  }, [loadEntries]);
+  }, [loadEntries, location.pathname]);
 
   const filteredList = list.filter((chat) =>
     chat.title?.toLowerCase().includes(searchQuery.toLowerCase())

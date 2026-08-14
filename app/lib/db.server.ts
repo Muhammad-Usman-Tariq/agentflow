@@ -33,12 +33,21 @@ export async function query(text: string, params?: any[], env?: Record<string, s
   const db = await getDb(env);
 
   if (db.type === 'neon') {
-    const result = await db.client.query(text, params); // ✅ .query() use karo
-    return { rows: result as any[] };
+    const client = db.client;
+    let result: any;
+    if (typeof client === 'function') {
+      result = await client(text, params || []);
+    } else if (typeof client.query === 'function') {
+      result = await client.query(text, params || []);
+    } else {
+      throw new Error('Invalid Neon DB client');
+    }
+    const rows = Array.isArray(result) ? result : (result?.rows || []);
+    return { rows };
   } else {
     const client = await db.client.connect();
     try {
-      const result = await client.query(text, params);
+      const result = await client.query(text, params || []);
       return result;
     } finally {
       client.release();
@@ -51,16 +60,40 @@ export async function query(text: string, params?: any[], env?: Record<string, s
 // ══════════════════════════════════════
 
 export async function saveProject(id: string, title: string, messages: any[], files: any, env?: Record<string, string>) {
-  const result = await query(
-    `INSERT INTO projects (chat_id, title, messages, files, updated_at)
-     VALUES ($1, $2, $3, $4, NOW())
-     ON CONFLICT (chat_id) DO UPDATE
-     SET title = $2, messages = $3, files = $4, updated_at = NOW()
-     RETURNING *`,
-    [id, title, JSON.stringify(messages), JSON.stringify(files)],
-    env
-  );
-  return result.rows[0];
+  const messagesJson = typeof messages === 'string' ? messages : JSON.stringify(messages || []);
+  const filesJson = typeof files === 'string' ? files : JSON.stringify(files || {});
+
+  try {
+    const result = await query(
+      `INSERT INTO projects (chat_id, title, messages, files, updated_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (chat_id) DO UPDATE
+       SET title = $2, messages = $3, files = $4, updated_at = NOW()
+       RETURNING *`,
+      [id, title, messagesJson, filesJson],
+      env
+    );
+    return result.rows[0];
+  } catch (e) {
+    const check = await query(`SELECT id FROM projects WHERE chat_id = $1`, [id], env);
+    if (check.rows.length > 0) {
+      const updateResult = await query(
+        `UPDATE projects SET title = $1, messages = $2, files = $3, updated_at = NOW()
+         WHERE chat_id = $4 RETURNING *`,
+        [title, messagesJson, filesJson, id],
+        env
+      );
+      return updateResult.rows[0];
+    } else {
+      const insertResult = await query(
+        `INSERT INTO projects (chat_id, title, messages, files, updated_at)
+         VALUES ($1, $2, $3, $4, NOW()) RETURNING *`,
+        [id, title, messagesJson, filesJson],
+        env
+      );
+      return insertResult.rows[0];
+    }
+  }
 }
 
 export async function getProject(id: string, env?: Record<string, string>) {
@@ -74,7 +107,7 @@ export async function getProject(id: string, env?: Record<string, string>) {
 
 export async function getAllProjects(env?: Record<string, string>) {
   const result = await query(
-    'SELECT id, title, created_at, updated_at FROM projects ORDER BY updated_at DESC',
+    'SELECT id, chat_id, title, created_at, updated_at FROM projects ORDER BY updated_at DESC',
     [],
     env
   );
@@ -129,16 +162,40 @@ export async function emailExists(email: string, env?: Record<string, string>): 
 }
 
 export async function saveProjectForUser(id: string, title: string, messages: any[], files: any, userId: string, env?: Record<string, string>) {
-  const result = await query(
-    `INSERT INTO projects (chat_id, title, messages, files, user_id, updated_at)
-     VALUES ($1, $2, $3, $4, $5, NOW())
-     ON CONFLICT (chat_id) DO UPDATE
-     SET title = $2, messages = $3, files = $4, user_id = $5, updated_at = NOW()
-     RETURNING *`,
-    [id, title, JSON.stringify(messages), JSON.stringify(files), userId],
-    env
-  );
-  return result.rows[0];
+  const messagesJson = typeof messages === 'string' ? messages : JSON.stringify(messages || []);
+  const filesJson = typeof files === 'string' ? files : JSON.stringify(files || {});
+
+  try {
+    const result = await query(
+      `INSERT INTO projects (chat_id, title, messages, files, user_id, updated_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())
+       ON CONFLICT (chat_id) DO UPDATE
+       SET title = $2, messages = $3, files = $4, user_id = $5, updated_at = NOW()
+       RETURNING *`,
+      [id, title, messagesJson, filesJson, userId],
+      env
+    );
+    return result.rows[0];
+  } catch (e) {
+    const check = await query(`SELECT id FROM projects WHERE chat_id = $1`, [id], env);
+    if (check.rows.length > 0) {
+      const updateResult = await query(
+        `UPDATE projects SET title = $1, messages = $2, files = $3, user_id = $4, updated_at = NOW()
+         WHERE chat_id = $5 RETURNING *`,
+        [title, messagesJson, filesJson, userId, id],
+        env
+      );
+      return updateResult.rows[0];
+    } else {
+      const insertResult = await query(
+        `INSERT INTO projects (chat_id, title, messages, files, user_id, updated_at)
+         VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *`,
+        [id, title, messagesJson, filesJson, userId],
+        env
+      );
+      return insertResult.rows[0];
+    }
+  }
 }
 
 export async function getProjectForUser(id: string, userId: string, env?: Record<string, string>) {

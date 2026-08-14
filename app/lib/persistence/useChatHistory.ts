@@ -84,8 +84,8 @@ export function useChatHistory() {
         return;
       }
 
-      const messages = project.messages as Message[];
-      const files = project.files;
+      const messages = (typeof project.messages === 'string' ? JSON.parse(project.messages) : project.messages) as Message[];
+      const files = typeof project.files === 'string' ? JSON.parse(project.files) : project.files;
 
       setInitialMessages(messages);
       description.set(project.title);
