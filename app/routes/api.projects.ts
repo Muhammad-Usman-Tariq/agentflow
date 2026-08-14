@@ -1,18 +1,25 @@
 import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from '@remix-run/cloudflare';
-import { saveProject, getAllProjects, getProject, query, saveProjectForUser, getAllProjectsForUser, deleteProjectForUser } from '~/lib/db.server';
-import { getUserFromCookie } from '~/lib/auth/user-from-cookie.server';
+
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.cloudflare?.env as any;
-  const user = getUserFromCookie(request.headers.get('Cookie'));
+  const { getUser } = await import('~/lib/auth/session.server');
+  const user = await getUser(request, env);
   const url = new URL(request.url);
   const id = url.searchParams.get('id');
 
+  const { getProjectForUser, getAllProjectsForUser } = await import('~/lib/db.server');
+
   if (id) {
-    const project = await getProject(id, env);
-    return json({ project });
+    if (!user) {
+      return json({ project: null });
+    }
+    const project = await getProjectForUser(id, user.userId, env);
+    return json({ project: project || null });
   }
 
-  if (!user) return json({ projects: [] });
+  if (!user) {
+    return json({ projects: [] });
+  }
 
   const projects = await getAllProjectsForUser(user.userId, env);
   return json({ projects });
@@ -20,7 +27,9 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
 export async function action({ request, context }: ActionFunctionArgs) {
   const env = context.cloudflare?.env as any;
-  const user = getUserFromCookie(request.headers.get('Cookie'));
+  const { getUser } = await import('~/lib/auth/session.server');
+  const user = await getUser(request, env);
+  const { saveProjectForUser, deleteProjectForUser } = await import('~/lib/db.server');
 
   if (request.method === 'DELETE') {
     const url = new URL(request.url);
@@ -28,22 +37,19 @@ export async function action({ request, context }: ActionFunctionArgs) {
     if (id) {
       if (user) {
         await deleteProjectForUser(id, user.userId, env);
-      } else {
-        await query('DELETE FROM projects WHERE chat_id = $1 OR id::text = $1', [id], env);
       }
       return json({ success: true });
     }
     return json({ error: 'No id provided' }, { status: 400 });
   }
 
-  const body = await request.json() as { id: string; title: string; messages: any[]; files: any };
-  const { id, title, messages, files } = body;
-
-  if (user) {
-    const project = await saveProjectForUser(id, title, messages, files, user.userId, env);
-    return json({ project });
+  if (!user) {
+    return json({ project: null });
   }
 
-  const project = await saveProject(id, title, messages, files, env);
+  const body = (await request.json()) as { id: string; title: string; messages: any[]; files: any };
+  const { id, title, messages, files } = body;
+
+  const project = await saveProjectForUser(id, title, messages, files, user.userId, env);
   return json({ project });
 }

@@ -1,8 +1,8 @@
 import { json, type ActionFunctionArgs } from '@remix-run/cloudflare';
 import { Orchestrator } from '~/lib/agents/core/orchestrator';
-import { query } from '~/lib/db.server';
 
 export async function action({ request, context }: ActionFunctionArgs) {
+  const { query } = await import('~/lib/db.server');
   const body = await request.json() as any;
   const { userRequest, chatId } = body;
 
@@ -72,6 +72,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
 // GET — check agent run status
 export async function loader({ request, context }: any) {
+  const { query } = await import('~/lib/db.server');
   const url = new URL(request.url);
   const runId = url.searchParams.get('runId');
 

@@ -1,9 +1,9 @@
 import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from '@remix-run/cloudflare';
 import { publishToAll, type PostPayload } from '~/lib/social/publisher';
-import { query } from '~/lib/db.server';
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
+    const { query } = await import('~/lib/db.server');
     const result = await query(
       'SELECT id, platform, account_name, is_active, created_at FROM social_accounts ORDER BY created_at DESC'
     );
@@ -14,6 +14,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
+  const { query } = await import('~/lib/db.server');
   const body = await request.json() as any;
   const { action } = body;
 

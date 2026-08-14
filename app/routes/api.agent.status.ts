@@ -1,8 +1,8 @@
 import type { LoaderFunctionArgs } from '@remix-run/cloudflare';
-import { query } from '~/lib/db.server';
 
 // Server Sent Events — real time progress streaming to UI
 export async function loader({ request, context }: LoaderFunctionArgs) {
+  const { query } = await import('~/lib/db.server');
   const env = context.cloudflare?.env as any;
   const url = new URL(request.url);
   const runId = url.searchParams.get('runId');
