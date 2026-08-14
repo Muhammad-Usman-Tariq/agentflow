@@ -367,9 +367,13 @@ export const ChatImpl = memo(
       // chatId nahi hai toh naya banao
       let currentChatId = chatId.get();
       if (!currentChatId) {
-        currentChatId = String(Date.now());
-        chatId.set(currentChatId);
-      }
+      currentChatId = String(Date.now());
+      chatId.set(currentChatId);
+      // ✅ URL update karo taake history save ho
+      const url = new URL(window.location.href);
+      url.pathname = `/chat/${currentChatId}`;
+        window.history.replaceState({}, '', url);
+        }
 
       setAgentRunning(true);
 
