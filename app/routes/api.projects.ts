@@ -3,19 +3,14 @@ import { saveProject, getAllProjects, getProject, query, saveProjectForUser, get
 import { verifyToken } from '~/lib/auth/auth.server';
 import { sessionStorage } from '~/lib/auth/session.server';
 
-async function getUserFromRequest(request: Request) {
-  try {
-    const session = await sessionStorage.getSession(request.headers.get('Cookie'));
-    const token = session.get('token');
-    return token ? verifyToken(token) : null;
-  } catch {
-    return null;
-  }
-}
-
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.cloudflare?.env as any;
-  const user = await getUserFromRequest(request);
+
+  // User check
+  const session = await sessionStorage.getSession(request.headers.get('Cookie'));
+  const token = session.get('token');
+  const user = token ? verifyToken(token) : null;
+
   const url = new URL(request.url);
   const id = url.searchParams.get('id');
 
@@ -24,9 +19,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     return json({ project });
   }
 
-  if (!user) {
-    return json({ projects: [] });
-  }
+  if (!user) return json({ projects: [] });
 
   const projects = await getAllProjectsForUser(user.userId, env);
   return json({ projects });
@@ -34,7 +27,10 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
 export async function action({ request, context }: ActionFunctionArgs) {
   const env = context.cloudflare?.env as any;
-  const user = await getUserFromRequest(request);
+
+  const session = await sessionStorage.getSession(request.headers.get('Cookie'));
+  const token = session.get('token');
+  const user = token ? verifyToken(token) : null;
 
   if (request.method === 'DELETE') {
     const url = new URL(request.url);
