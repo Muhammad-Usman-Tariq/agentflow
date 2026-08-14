@@ -24,10 +24,10 @@ export default defineConfig((config) => {
     },
     // ✅ FIX: pg aur auth packages ko browser bundle se bahar rakho
     ssr: {
-      external: ['pg', 'pg-native', 'bcryptjs', 'jsonwebtoken'],
+      external: ['pg', 'pg-native', 'bcryptjs', 'jsonwebtoken', '@neondatabase/serverless'],
     },
     optimizeDeps: {
-      exclude: ['pg', 'pg-native', 'bcryptjs', 'jsonwebtoken'],
+      exclude: ['pg', 'pg-native', 'bcryptjs', 'jsonwebtoken', '@neondatabase/serverless'],
     },
     plugins: [
       nodePolyfills({
@@ -54,13 +54,14 @@ export default defineConfig((config) => {
         },
       },
       config.mode !== 'test' && remixCloudflareDevProxy(),
-      remixVitePlugin({
+     remixVitePlugin({
         future: {
           v3_fetcherPersist: true,
           v3_relativeSplatPath: true,
           v3_throwAbortReason: true,
           v3_lazyRouteDiscovery: true,
         },
+        serverModuleFormat: 'esm',
       }),
       UnoCSS(),
       tsconfigPaths(),
