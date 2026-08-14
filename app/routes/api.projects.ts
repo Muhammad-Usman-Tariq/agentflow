@@ -1,19 +1,6 @@
 import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from '@remix-run/cloudflare';
 import { saveProject, getAllProjects, getProject, query, saveProjectForUser, getAllProjectsForUser, deleteProjectForUser } from '~/lib/db.server';
-
-function getUserFromCookie(cookieHeader: string | null): any {
-  if (!cookieHeader) return null;
-  try {
-    // __bolt_session cookie mein base64 encoded data hota hai
-    const match = cookieHeader.match(/__bolt_session=([^;]+)/);
-    if (!match) return null;
-    const decoded = JSON.parse(atob(decodeURIComponent(match[1])));
-    return decoded?.token ? JSON.parse(atob(decoded.token.split('.')[1])) : null;
-  } catch {
-    return null;
-  }
-}
-
+import { getUserFromCookie } from '~/lib/auth/user-from-cookie.server';
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.cloudflare?.env as any;
   const user = getUserFromCookie(request.headers.get('Cookie'));
