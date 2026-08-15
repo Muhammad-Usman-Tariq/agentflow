@@ -1,4 +1,4 @@
-﻿import type { Message } from 'ai';
+import type { Message } from 'ai';
 
 const ARTIFACT_TAG_OPEN = '<boltArtifact';
 const ARTIFACT_TAG_CLOSE = '</boltArtifact>';
@@ -40,24 +40,44 @@ function convertToXml(content: string): string {
   if (!content) return '';
   if (content.includes('<boltArtifact')) return content;
 
-  const codeBlockMatch = content.match(/```(?:\w+)?\n?([\s\S]*?)```/);
-  if (codeBlockMatch) {
-    const code = codeBlockMatch[1];
-    const ext = content.match(/```(\w+)/)?.[1] || 'html';
-    const fileName =
+  const codeBlockRegex = /```(\w+)?\n?([\s\S]*?)```/g;
+  const matches = Array.from(content.matchAll(codeBlockRegex));
+
+  if (matches.length === 0) return content;
+
+  const firstFenceIndex = content.indexOf('```');
+  const textBefore = content.substring(0, firstFenceIndex).trim();
+  const actions: string[] = [];
+  const fileCountMap: Record<string, number> = {};
+
+  for (const match of matches) {
+    const ext = (match[1] || 'html').toLowerCase();
+    const code = match[2].trim();
+    if (!code) continue;
+
+    let baseName =
       ext === 'html' ? 'index.html'
       : ext === 'css' ? 'styles.css'
       : ext === 'jsx' || ext === 'tsx' ? 'App.tsx'
       : ext === 'js' ? 'index.js'
       : ext === 'ts' ? 'index.ts'
-      : `index.${ext}`;
+      : ext === 'json' ? 'package.json'
+      : `file.${ext}`;
 
-    return `<boltArtifact id="auto-${Date.now()}" title="Generated Code">
-<boltAction type="file" filePath="${fileName}">${code}</boltAction>
-</boltArtifact>`;
+    fileCountMap[baseName] = (fileCountMap[baseName] || 0) + 1;
+    if (fileCountMap[baseName] > 1) {
+      const parts = baseName.split('.');
+      const extPart = parts.pop();
+      baseName = `${parts.join('.')}_${fileCountMap[baseName]}.${extPart}`;
+    }
+
+    actions.push(`<boltAction type="file" filePath="${baseName}">${code}</boltAction>`);
   }
 
-  return content;
+  if (actions.length === 0) return content;
+
+  const artifactXml = `<boltArtifact id="generated-project" title="Generated Project">\n${actions.join('\n')}\n</boltArtifact>`;
+  return textBefore ? `${textBefore}\n${artifactXml}` : artifactXml;
 }
 
 // ── Parser ────────────────────────────────────────────────────────────────────

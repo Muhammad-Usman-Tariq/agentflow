@@ -72,8 +72,8 @@ export async function streamText(props: {
   logger.info(`Using Provider: ${currentProvider}, Model: ${currentModel}, Key: ${currentApiKey ? 'SET' : 'MISSING'}`);
 
   const finalApiKeys: Record<string, string> = {
-    ...apiKeys,
     [currentProvider]: currentApiKey,
+    ...apiKeys,
   };
 
   let processedMessages = messages.map((message) => {

@@ -198,13 +198,11 @@ export const ChatImpl = memo(
     }, []);
 
     useEffect(() => {
-      processSampledMessages({
-        messages,
-        initialMessages,
-        isLoading,
-        parseMessages,
-        storeMessageHistory,
-      });
+      parseMessages(messages, isLoading);
+
+      if (messages.length > initialMessages.length) {
+        storeMessageHistory(messages).catch((error) => toast.error(error.message));
+      }
     }, [messages, isLoading, parseMessages]);
 
     const scrollTextArea = () => {

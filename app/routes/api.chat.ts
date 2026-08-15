@@ -48,7 +48,7 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
     },
   });
 
-  const { messages, files, promptId, contextOptimization, supabase, chatMode, designScheme, maxLLMSteps } =
+  const { messages, files, promptId, contextOptimization, supabase, chatMode, designScheme, maxLLMSteps, apiKeys: clientApiKeys } =
     await request.json<{
       messages: Messages;
       files: any;
@@ -56,25 +56,26 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
       contextOptimization: boolean;
       chatMode: 'discuss' | 'build';
       designScheme?: DesignScheme;
-      supabase?: {
-        isConnected: boolean;
-        hasSelectedProject: boolean;
-        credentials?: {
-          anonKey?: string;
-          supabaseUrl?: string;
-        };
-      };
+      supabase?: any;
       maxLLMSteps: number;
+      apiKeys?: Record<string, string>;
     }>();
 
   const cookieHeader = request.headers.get('Cookie');
+  const cookies = parseCookies(cookieHeader || '');
+  const cookieApiKeys = JSON.parse(cookies.apiKeys || '{}');
+
   const env = (context.cloudflare?.env as unknown) as Record<string, string> || {};
-const providerName = env.PROVIDER_NAME || '';
-const apiKeys: Record<string, string> = {
-  [providerName]: env.PROVIDER_API_KEY || '',
-};
+  const providerName = env.PROVIDER_NAME || '';
+
+  const apiKeys: Record<string, string> = {
+    [providerName]: env.PROVIDER_API_KEY || '',
+    ...cookieApiKeys,
+    ...(clientApiKeys || {}),
+  };
+
   const providerSettings: Record<string, IProviderSetting> = JSON.parse(
-    parseCookies(cookieHeader || '').providers || '{}',
+    cookies.providers || '{}',
   );
 
   const stream = new SwitchableStream();
