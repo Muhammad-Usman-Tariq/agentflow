@@ -35,11 +35,12 @@ export async function query(text: string, params?: any[], env?: Record<string, s
   if (db.type === 'neon') {
     const client = db.client;
     let result: any;
-    if (typeof client === 'function') {
-      result = await client(text, params || []);
-    } else if (typeof client.query === 'function') {
+    if (typeof client.query === 'function') {
+     result = await client.query(text, params || []);
+}    else if (typeof client === 'function') {
+    // neon tagged template — use sql.query instead
       result = await client.query(text, params || []);
-    } else {
+    }else {
       throw new Error('Invalid Neon DB client');
     }
     const rows = Array.isArray(result) ? result : (result?.rows || []);
@@ -215,7 +216,7 @@ export async function emailExists(email: string, env?: Record<string, string>): 
 }
 
 export async function saveProjectForUser(id: string, title: string, messages: any[], files: any, userId: string, env?: Record<string, string>) {
-  await ensureSchema(env);
+  
 
   const messagesJson = typeof messages === 'string' ? messages : JSON.stringify(messages || []);
   const filesJson = typeof files === 'string' ? files : JSON.stringify(files || {});
@@ -265,7 +266,6 @@ export async function saveProjectForUser(id: string, title: string, messages: an
 }
 
 export async function getProjectForUser(id: string, userId: string, env?: Record<string, string>) {
-  await ensureSchema(env);
   try {
     const result = await query(
       `SELECT * FROM projects WHERE (chat_id = $1 OR id::text = $1) AND user_id = $2`,
@@ -281,7 +281,6 @@ export async function getProjectForUser(id: string, userId: string, env?: Record
 }
 
 export async function getAllProjectsForUser(userId: string, env?: Record<string, string>) {
-  await ensureSchema(env);
   try {
     const result = await query(
       `SELECT id, chat_id, title, created_at, updated_at
