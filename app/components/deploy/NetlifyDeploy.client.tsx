@@ -45,6 +45,10 @@ export function useNetlifyDeploy() {
 
       const deployArtifact = workbenchStore.artifacts.get()[deploymentId];
 
+      if (!deployArtifact?.runner || !artifact?.runner) {
+        throw new Error('Artifact runner not initialized');
+      }
+
       // Notify that build is starting
       deployArtifact.runner.handleDeployAction('building', 'running', { source: 'netlify' });
 
@@ -161,7 +165,7 @@ export function useNetlifyDeploy() {
         console.error('Invalid deploy response:', data);
 
         // Notify that deployment failed
-        deployArtifact.runner.handleDeployAction('deploying', 'failed', {
+        deployArtifact?.runner?.handleDeployAction('deploying', 'failed', {
           error: data.error || 'Invalid deployment response',
           source: 'netlify',
         });
@@ -191,7 +195,7 @@ export function useNetlifyDeploy() {
 
           if (deploymentStatus.state === 'error') {
             // Notify that deployment failed
-            deployArtifact.runner.handleDeployAction('deploying', 'failed', {
+            deployArtifact?.runner?.handleDeployAction('deploying', 'failed', {
               error: 'Deployment failed: ' + (deploymentStatus.error_message || 'Unknown error'),
               source: 'netlify',
             });
@@ -209,7 +213,7 @@ export function useNetlifyDeploy() {
 
       if (attempts >= maxAttempts) {
         // Notify that deployment timed out
-        deployArtifact.runner.handleDeployAction('deploying', 'failed', {
+        deployArtifact?.runner?.handleDeployAction('deploying', 'failed', {
           error: 'Deployment timed out',
           source: 'netlify',
         });
@@ -222,7 +226,7 @@ export function useNetlifyDeploy() {
       }
 
       // Notify that deployment completed successfully
-      deployArtifact.runner.handleDeployAction('complete', 'complete', {
+      deployArtifact?.runner?.handleDeployAction('complete', 'complete', {
         url: deploymentStatus.ssl_url || deploymentStatus.url,
         source: 'netlify',
       });

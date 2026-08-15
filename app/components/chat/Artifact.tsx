@@ -50,11 +50,15 @@ export const Artifact = memo(({ artifactId }: ArtifactProps) => {
   };
 
   useEffect(() => {
+    if (!artifact || !artifact.runner) {
+      return;
+    }
+
     if (actions.length && !showActions && !userToggledActions.current) {
       setShowActions(true);
     }
 
-    if (actions.length !== 0 && artifact.type === 'bundled') {
+    if (actions.length !== 0 && artifact?.type === 'bundled') {
       const finished = !actions.find(
         (action) => action.status !== 'complete' && !(action.type === 'start' && action.status === 'running'),
       );
@@ -63,7 +67,12 @@ export const Artifact = memo(({ artifactId }: ArtifactProps) => {
         setAllActionFinished(finished);
       }
     }
-  }, [actions, artifact.type, allActionFinished]);
+  }, [actions, artifact?.type, allActionFinished]);
+
+  if (!artifact || !artifact.runner) {
+    return null;
+  }
+
 
   // Determine the dynamic title based on state for bundled artifacts
   const dynamicTitle =

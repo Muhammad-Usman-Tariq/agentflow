@@ -45,6 +45,10 @@ export function useVercelDeploy() {
 
       const deployArtifact = workbenchStore.artifacts.get()[deploymentId];
 
+      if (!deployArtifact?.runner || !artifact?.runner) {
+        throw new Error('Artifact runner not initialized');
+      }
+
       // Notify that build is starting
       deployArtifact.runner.handleDeployAction('building', 'running', { source: 'vercel' });
 
@@ -199,7 +203,7 @@ export function useVercelDeploy() {
         console.error('Invalid deploy response:', data);
 
         // Notify that deployment failed
-        deployArtifact.runner.handleDeployAction('deploying', 'failed', {
+        deployArtifact?.runner?.handleDeployAction('deploying', 'failed', {
           error: data.error || 'Invalid deployment response',
           source: 'vercel',
         });
@@ -211,7 +215,7 @@ export function useVercelDeploy() {
       }
 
       // Notify that deployment completed successfully
-      deployArtifact.runner.handleDeployAction('complete', 'complete', {
+      deployArtifact?.runner?.handleDeployAction('complete', 'complete', {
         url: data.deploy.url,
         source: 'vercel',
       });

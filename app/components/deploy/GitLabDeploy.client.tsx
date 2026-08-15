@@ -46,6 +46,10 @@ export function useGitLabDeploy() {
 
       const deployArtifact = workbenchStore.artifacts.get()[deploymentId];
 
+      if (!deployArtifact?.runner || !artifact?.runner) {
+        throw new Error('Artifact runner not initialized');
+      }
+
       // Notify that build is starting
       deployArtifact.runner.handleDeployAction('building', 'running', { source: 'gitlab' });
 
@@ -144,7 +148,7 @@ export function useGitLabDeploy() {
        * For now, we'll just complete the deployment with a success message
        * Notify that deployment preparation is complete
        */
-      deployArtifact.runner.handleDeployAction('deploying', 'complete', {
+      deployArtifact?.runner?.handleDeployAction('deploying', 'complete', {
         source: 'gitlab',
       });
 
