@@ -705,10 +705,10 @@ export const ChatImpl = memo(
           addToolResult={addToolResult}
           onWebSearchResult={handleWebSearchResult}
         />
-        <AgentProgress
+         {/* <AgentProgress
           runId={agentRunId}
           onComplete={() => setAgentRunId(null)}
-        />
+        />  */}
       </>
     );
   },
