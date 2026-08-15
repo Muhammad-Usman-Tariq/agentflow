@@ -1,13 +1,15 @@
 import { useStore } from '@nanostores/react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { atom, computed } from 'nanostores';
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { createHighlighter, type BundledLanguage, type BundledTheme, type HighlighterGeneric } from 'shiki';
 import type { ActionState } from '~/lib/runtime/action-runner';
 import { workbenchStore } from '~/lib/stores/workbench';
 import { classNames } from '~/utils/classNames';
 import { cubicEasingFn } from '~/utils/easings';
 import { WORK_DIR } from '~/utils/constants';
+
+const emptyActionsStore = atom<Record<string, any>>({});
 
 const highlighterOptions = {
   langs: ['shell'],
@@ -34,14 +36,19 @@ export const Artifact = memo(({ artifactId }: ArtifactProps) => {
   const artifacts = useStore(workbenchStore.artifacts);
   const artifact = artifacts[artifactId];
 
-  const actionsStore = artifact?.runner?.actions ?? atom({});
+  const actionsStore = artifact?.runner?.actions || emptyActionsStore;
+
   const actions = useStore(
-    computed(actionsStore, (actions) => {
-      if (!actions || typeof actions !== 'object') return [];
-      return Object.values(actions).filter((action: any) => {
-        return action.type !== 'supabase' && !(action.type === 'shell' && action.content?.includes('supabase'));
-      });
-    }),
+    useMemo(
+      () =>
+        computed(actionsStore, (actionsMap) => {
+          if (!actionsMap || typeof actionsMap !== 'object') return [];
+          return Object.values(actionsMap).filter((action: any) => {
+            return action.type !== 'supabase' && !(action.type === 'shell' && action.content?.includes('supabase'));
+          });
+        }),
+      [actionsStore],
+    ),
   );
 
   const toggleActions = () => {
