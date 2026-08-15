@@ -20,24 +20,27 @@ const messageParser = new EnhancedStreamingMessageParser({
       workbenchStore.updateArtifact(data, { closed: true });
     },
     onActionOpen: (data) => {
-      logger.trace('onActionOpen', data.action);
+      // Enhanced parser sets data.type directly (data.action may be undefined)
+      const actionType = data.type ?? data.action?.type;
+      logger.trace('onActionOpen', actionType, data.filePath);
 
       /*
        * File actions are streamed, so we add them immediately to show progress
        * Shell actions are complete when created by enhanced parser, so we wait for close
        */
-      if (data.action.type === 'file') {
+      if (actionType === 'file') {
         workbenchStore.addAction(data);
       }
     },
     onActionClose: (data) => {
-      logger.trace('onActionClose', data.action);
+      // Enhanced parser sets data.type directly (data.action may be undefined)
+      const actionType = data.type ?? data.action?.type;
+      logger.trace('onActionClose', actionType, data.filePath);
 
       /*
        * Add non-file actions (shell, build, start, etc.) when they close
-       * Enhanced parser creates complete shell actions, so they're ready to execute
        */
-      if (data.action.type !== 'file') {
+      if (actionType !== 'file') {
         workbenchStore.addAction(data);
       }
 
@@ -49,6 +52,7 @@ const messageParser = new EnhancedStreamingMessageParser({
     },
   },
 });
+
 const extractTextContent = (message: Message) =>
   Array.isArray(message.content)
     ? (message.content.find((item) => item.type === 'text')?.text as string) || ''

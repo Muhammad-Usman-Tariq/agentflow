@@ -99,12 +99,14 @@ export class EnhancedStreamingMessageParser {
         const [, type, filePath, content] = actionMatch;
         const actionId = `action-${actionIndex++}`;
 
+        // Populate both data.type (direct) AND data.action (for backward compat)
         this.callbacks.onActionOpen?.({
           artifactId,
           messageId,
           actionId,
           type,
           filePath,
+          action: { type: type as 'file' | 'shell' | 'start', filePath, content: content.trim() },
         });
 
         this.callbacks.onActionClose?.({
@@ -114,8 +116,10 @@ export class EnhancedStreamingMessageParser {
           type,
           filePath,
           content: content.trim(),
+          action: { type: type as 'file' | 'shell' | 'start', filePath, content: content.trim() },
         });
       }
+
 
       this.callbacks.onArtifactClose?.({
         messageId,
