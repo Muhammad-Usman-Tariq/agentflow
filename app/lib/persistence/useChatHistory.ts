@@ -205,6 +205,8 @@ export function useChatHistory() {
 
       // Restore files into WebContainer and Workbench Store
       if (filesToRestore && Object.keys(filesToRestore).length > 0) {
+          workbenchStore.showWorkbench.set(true);
+          chatStore.setKey('started', true);
         console.log('[CHAT LOAD] Restoring', Object.keys(filesToRestore).length, 'files');
         try {
           const container = await webcontainer;
