@@ -65,13 +65,13 @@ const processSampledMessages = createSampler(
     initialMessages: Message[];
     isLoading: boolean;
     parseMessages: (messages: Message[], isLoading: boolean) => void;
-    storeMessageHistory: (messages: Message[]) => Promise<void>;
+    storeMessageHistory: (messages: Message[], files?: Record<string, any>) => Promise<void>;
   }) => {
     const { messages, initialMessages, isLoading, parseMessages, storeMessageHistory } = options;
     parseMessages(messages, isLoading);
 
     if (messages.length > initialMessages.length) {
-      storeMessageHistory(messages).catch((error) => toast.error(error.message));
+      storeMessageHistory(messages, workbenchStore.files.get()).catch((error) => toast.error(error.message));
     }
   },
   50,
@@ -79,7 +79,7 @@ const processSampledMessages = createSampler(
 
 interface ChatProps {
   initialMessages: Message[];
-  storeMessageHistory: (messages: Message[]) => Promise<void>;
+  storeMessageHistory: (messages: Message[], files?: Record<string, any>) => Promise<void>;
   importChat: (description: string, messages: Message[]) => Promise<void>;
   exportChat: () => void;
   description?: string;
@@ -201,7 +201,7 @@ export const ChatImpl = memo(
       parseMessages(messages, isLoading);
 
       if (messages.length > initialMessages.length) {
-        storeMessageHistory(messages).catch((error) => toast.error(error.message));
+        storeMessageHistory(messages, workbenchStore.files.get()).catch((error) => toast.error(error.message));
       }
     }, [messages, isLoading, parseMessages]);
 
@@ -448,7 +448,7 @@ export const ChatImpl = memo(
       }
 
       // ✅ History save karo agent ke baad
-      await storeMessageHistory(messages);
+      await storeMessageHistory(messages, workbenchStore.files.get());
     }
   } catch (e) {
     console.error('Agent error:', e);

@@ -1,4 +1,4 @@
-﻿import { useLoaderData, useNavigate, useParams } from '@remix-run/react';
+import { useLoaderData, useNavigate, useParams } from '@remix-run/react';
 import { useState, useEffect } from 'react';
 import { atom } from 'nanostores';
 import { type Message } from 'ai';
@@ -281,7 +281,7 @@ export function useChatHistory() {
   return {
     ready: !mixedId || ready,
     initialMessages,
-    storeMessageHistory: async (messages: Message[]) => {
+    storeMessageHistory: async (messages: Message[], files?: Record<string, any>) => {
       if (messages.length === 0) return;
 
       messages = messages.filter((m) => !m.annotations?.includes('no-store'));
@@ -313,8 +313,8 @@ export function useChatHistory() {
 
       const title = description.get() || 'Untitled Project';
 
-      // Capture all files from workbench store AND WebContainer filesystem
-      const storeFiles = workbenchStore.files.get() || {};
+      // Capture all files from passed argument / workbench store AND WebContainer filesystem
+      const storeFiles = files || workbenchStore.files.get() || {};
       const containerFiles = await readWebContainerFiles();
       const mergedFiles = { ...storeFiles, ...containerFiles };
 
