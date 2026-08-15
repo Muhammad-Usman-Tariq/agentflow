@@ -36,7 +36,10 @@ export const Artifact = memo(({ artifactId }: ArtifactProps) => {
   const artifacts = useStore(workbenchStore.artifacts);
   const artifact = artifacts[artifactId];
 
-  const actionsStore = artifact?.runner?.actions || emptyActionsStore;
+  const actionsStore =
+    typeof artifact?.runner?.actions?.listen === 'function'
+      ? artifact.runner.actions
+      : emptyActionsStore;
 
   const actions = useStore(
     useMemo(

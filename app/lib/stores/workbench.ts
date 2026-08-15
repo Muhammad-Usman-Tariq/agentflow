@@ -457,7 +457,7 @@ export class WorkbenchStore {
   const artifactId = (id ?? messageId) as string;
   const artifact = this.#getArtifact(artifactId);
 
-  if (artifact) {
+  if (artifact && artifact.runner && typeof artifact.runner.actions?.listen === 'function') {
     return;
   }
 
