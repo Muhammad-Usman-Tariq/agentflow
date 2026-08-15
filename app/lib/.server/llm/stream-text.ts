@@ -103,9 +103,9 @@ export async function streamText(props: {
 
   const safeMaxTokens = 8192;
 
-  logger.info(`Sending llm call to ${provider.name} with model ${modelDetails.name}`);
-
-  let systemPrompt =
+ logger.info(`Sending llm call to ${provider.name} with model ${modelDetails.name}`);
+  console.log('chatMode:', chatMode);
+let systemPrompt =
     PromptLibrary.getPropmtFromLibrary(promptId || 'default', {
       cwd: WORK_DIR,
       allowedHtmlElements: allowedHTMLElements,
@@ -157,8 +157,9 @@ export async function streamText(props: {
           ),
         )
       : options || {};
-
-  const streamParams = {
+        // temp debug
+      console.log('chatMode:', chatMode);
+      const streamParams = {
     model: provider.getModelInstance({
       model: modelDetails.name,
       serverEnv,
