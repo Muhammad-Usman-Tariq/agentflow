@@ -1,4 +1,4 @@
-import { useLoaderData, useNavigate, useParams } from '@remix-run/react';
+﻿import { useLoaderData, useNavigate, useParams } from '@remix-run/react';
 import { useState, useEffect } from 'react';
 import { atom } from 'nanostores';
 import { type Message } from 'ai';
@@ -10,11 +10,75 @@ import { chatSaved, lastSaved } from '~/lib/stores/sidebar';
 export const chatId = atom<string | undefined>(undefined);
 export const description = atom<string | undefined>(undefined);
 
+// ── WebContainer File Scanner ──────────────────────────────────────────────────
+
+async function readWebContainerFiles(): Promise<Record<string, { type: 'file'; content: string; isBinary: boolean }>> {
+  const result: Record<string, { type: 'file'; content: string; isBinary: boolean }> = {};
+  try {
+    const container = await webcontainer;
+    async function scanDir(dirPath: string) {
+      const entries = await container.fs.readdir(dirPath, { withFileTypes: true });
+      for (const entry of entries) {
+        if (
+          entry.name === 'node_modules' ||
+          entry.name === '.git' ||
+          entry.name === 'dist' ||
+          entry.name === 'build' ||
+          entry.name.startsWith('.')
+        ) {
+          continue;
+        }
+        const fullPath = dirPath === '/' ? '/' + entry.name : dirPath + '/' + entry.name;
+        if (entry.isDirectory()) {
+          await scanDir(fullPath);
+        } else if (entry.isFile()) {
+          try {
+            const content = await container.fs.readFile(fullPath, 'utf8');
+            const cleanPath = fullPath.replace(/^\/+/, '');
+            result[cleanPath] = { type: 'file', content, isBinary: false };
+          } catch {}
+        }
+      }
+    }
+    await scanDir('/');
+  } catch (err) {
+    console.warn('[CHAT SAVE] Failed to scan WebContainer fs:', err);
+  }
+  return result;
+}
+
+// ── Fallback Message Parser for File Extraction ────────────────────────────────
+
+function extractFilesFromMessages(messages: Message[]): Record<string, { type: 'file'; content: string; isBinary: boolean }> {
+  const fileMap: Record<string, { type: 'file'; content: string; isBinary: boolean }> = {};
+  for (const message of messages) {
+    if (message.role !== 'assistant') continue;
+    const content = typeof message.content === 'string' ? message.content : '';
+    if (!content.includes('<boltAction')) continue;
+
+    const actionMatches = content.matchAll(
+      /<boltAction[^>]*type="file"(?:[^>]*filePath="([^"]*)")?[^>]*>([\s\S]*?)<\/boltAction>/g
+    );
+    for (const match of actionMatches) {
+      const [, filePath, fileContent] = match;
+      if (filePath) {
+        const storePath = filePath.replace('/home/project/', '').replace(/^\/+/, '');
+        fileMap[storePath] = {
+          type: 'file',
+          content: fileContent.trim(),
+          isBinary: false,
+        };
+      }
+    }
+  }
+  return fileMap;
+}
+
 // ── Save ──────────────────────────────────────────────────────────────────────
 
 async function saveToDatabase(id: string, title: string, messages: Message[], files: any) {
   try {
-    console.log('[CHAT SAVE] id:', id, '| title:', title, '| msgs:', messages.length);
+    console.log('[CHAT SAVE] id:', id, '| title:', title, '| msgs:', messages.length, '| files:', Object.keys(files || {}).length);
 
     const res = await fetch('/api/projects', {
       method: 'POST',
@@ -27,9 +91,7 @@ async function saveToDatabase(id: string, title: string, messages: Message[], fi
     console.log('[CHAT SAVE] status:', res.status, '| body:', raw.slice(0, 200));
 
     if (res.ok) {
-      // Optimistic update: immediately push into sidebar list
       lastSaved.set({ chat_id: id, title });
-      // Also bump chatSaved to trigger a full DB re-fetch
       chatSaved.set(chatSaved.get() + 1);
       console.log('[CHAT SAVE] OK — chatSaved =', chatSaved.get());
     } else {
@@ -40,7 +102,6 @@ async function saveToDatabase(id: string, title: string, messages: Message[], fi
   }
 }
 
-
 // ── Load ──────────────────────────────────────────────────────────────────────
 
 async function loadFromDatabase(id: string) {
@@ -48,7 +109,7 @@ async function loadFromDatabase(id: string) {
     const res = await fetch(`/api/projects?id=${encodeURIComponent(id)}`, {
       credentials: 'same-origin',
     });
-    const data = await res.json() as { project: any };
+    const data = (await res.json()) as { project: any };
     console.log('[CHAT LOAD] id:', id, '| found:', !!data.project, '| title:', data.project?.title);
     return data.project || null;
   } catch (err) {
@@ -103,13 +164,15 @@ export function useChatHistory() {
       description.set(undefined);
       chatId.set(undefined);
 
-      // Clear WebContainer filesystem
+      // Clear WebContainer filesystem except node_modules
       try {
         const container = await webcontainer;
         const entries = await container.fs.readdir('/', { withFileTypes: true });
         for (const entry of entries) {
           if (entry.name !== 'node_modules') {
-            try { await container.fs.rm('/' + entry.name, { recursive: true }); } catch {}
+            try {
+              await container.fs.rm('/' + entry.name, { recursive: true });
+            } catch {}
           }
         }
       } catch {}
@@ -127,64 +190,87 @@ export function useChatHistory() {
         typeof project.messages === 'string' ? JSON.parse(project.messages) : project.messages
       ) as Message[];
 
-      const files =
-        typeof project.files === 'string' ? JSON.parse(project.files) : project.files;
+      let filesToRestore =
+        typeof project.files === 'string' ? JSON.parse(project.files) : (project.files || {});
+
+      // Fallback: if project.files is empty, extract files from generated messages
+      if (!filesToRestore || Object.keys(filesToRestore).length === 0) {
+        console.log('[CHAT LOAD] files column empty — extracting generated files from message history...');
+        filesToRestore = extractFilesFromMessages(messages);
+      }
 
       setInitialMessages(messages);
       description.set(project.title);
       chatId.set(mixedId);
 
-      // Restore files into WebContainer
-      if (files && Object.keys(files).length > 0) {
-        console.log('[CHAT LOAD] Restoring', Object.keys(files).length, 'files');
+      // Restore files into WebContainer and Workbench Store
+      if (filesToRestore && Object.keys(filesToRestore).length > 0) {
+        console.log('[CHAT LOAD] Restoring', Object.keys(filesToRestore).length, 'files');
         try {
           const container = await webcontainer;
           const fileMap: Record<string, any> = {};
 
-          for (const [rawPath, fileData] of Object.entries(files as Record<string, any>)) {
-            if ((fileData as any)?.type !== 'file') continue;
+          for (const [rawPath, fileData] of Object.entries(filesToRestore as Record<string, any>)) {
+            const storePath = rawPath.replace('/home/project/', '').replace(/^\/+/, '');
+            const content = typeof fileData === 'string' ? fileData : (fileData as any)?.content ?? '';
 
-            const storePath = rawPath
-              .replace('/home/project/', '')
-              .replace(/^\/+/, '');
-
-            const content = (fileData as any).content ?? '';
             fileMap[storePath] = { type: 'file' as const, content, isBinary: false };
 
             const fsPath = '/' + storePath;
             try {
               const dir = fsPath.substring(0, fsPath.lastIndexOf('/'));
-              if (dir && dir !== '/') await container.fs.mkdir(dir, { recursive: true });
+              if (dir && dir !== '/') {
+                await container.fs.mkdir(dir, { recursive: true });
+              }
               await container.fs.writeFile(fsPath, content, { encoding: 'utf8' });
             } catch (e) {
               console.error('[CHAT LOAD] Write failed:', fsPath, e);
             }
           }
 
-          for (const [path, dirent] of Object.entries(fileMap)) {
-            workbenchStore.files.setKey(path, dirent);
+          for (const [pathKey, dirent] of Object.entries(fileMap)) {
+            workbenchStore.files.setKey(pathKey, dirent);
           }
           workbenchStore.setDocuments(fileMap);
           workbenchStore.showWorkbench.set(true);
           chatStore.setKey('started', true);
-          console.log('[CHAT LOAD] Files restored:', Object.keys(fileMap).length);
 
-          // Start dev server
+          // Select the first file to show in the code editor
+          const firstFileKey = Object.keys(fileMap).find((k) => k.endsWith('.tsx') || k.endsWith('.jsx') || k.endsWith('.html') || k.endsWith('.js') || k.endsWith('.ts')) || Object.keys(fileMap)[0];
+          if (firstFileKey) {
+            workbenchStore.setSelectedFile(firstFileKey);
+          }
+
+          console.log('[CHAT LOAD] Files restored successfully:', Object.keys(fileMap).length);
+
+          // Auto-start dev server if package.json exists
           try {
             if (fileMap['package.json']) {
               const inst = await container.spawn('npm', ['install']);
               await inst.exit;
               const dev = await container.spawn('npm', ['run', 'dev']);
-              dev.output.pipeTo(new WritableStream({ write(d) { console.log('[dev]', d); } }));
+              dev.output.pipeTo(
+                new WritableStream({
+                  write(d) {
+                    console.log('[dev]', d);
+                  },
+                })
+              );
             } else {
               const srv = await container.spawn('npx', ['-y', 'serve', '.', '--listen', '3000']);
-              srv.output.pipeTo(new WritableStream({ write(d) { console.log('[serve]', d); } }));
+              srv.output.pipeTo(
+                new WritableStream({
+                  write(d) {
+                    console.log('[serve]', d);
+                  },
+                })
+              );
             }
           } catch (e) {
-            console.error('[CHAT LOAD] Dev server error:', e);
+            console.error('[CHAT LOAD] Dev server start error:', e);
           }
         } catch (e) {
-          console.error('[CHAT LOAD] WebContainer error:', e);
+          console.error('[CHAT LOAD] WebContainer error during restore:', e);
         }
       }
 
@@ -226,14 +312,15 @@ export function useChatHistory() {
       if (!finalChatId) return;
 
       const title = description.get() || 'Untitled Project';
-      console.log('[CHAT STORE] Saving:', finalChatId, '|', title);
 
-      await saveToDatabase(
-        finalChatId,
-        title,
-        messages,
-        workbenchStore.files.get()
-      );
+      // Capture all files from workbench store AND WebContainer filesystem
+      const storeFiles = workbenchStore.files.get() || {};
+      const containerFiles = await readWebContainerFiles();
+      const mergedFiles = { ...storeFiles, ...containerFiles };
+
+      console.log('[CHAT STORE] Saving:', finalChatId, '| title:', title, '| files count:', Object.keys(mergedFiles).length);
+
+      await saveToDatabase(finalChatId, title, messages, mergedFiles);
     },
     updateChatMestaData: async () => {},
     duplicateCurrentChat: async () => {},

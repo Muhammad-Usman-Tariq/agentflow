@@ -550,13 +550,14 @@ export class WorkbenchStore {
 
     if (data.action?.type === 'file') {
       const wc = await webcontainer;
-      const fullPath = path.join(wc.workdir, data.action?.filePath ?? '');
+      const rawPath = data.action?.filePath ?? '';
+      const relPath = rawPath.replace('/home/project/', '').replace(/^\/+/, '');
+      const fullPath = path.join(wc.workdir, relPath || rawPath);
+      const content = data.action?.content ?? '';
 
-      /*
-       * For scoped locks, we would need to implement diff checking here
-       * to determine if the AI is modifying existing code or just adding new code
-       * This is a more complex feature that would be implemented in a future update
-       */
+      if (relPath) {
+        this.files.setKey(relPath, { type: 'file', content, isBinary: false });
+      }
 
       if (this.selectedFile.value !== fullPath) {
         this.setSelectedFile(fullPath);
@@ -572,7 +573,7 @@ export class WorkbenchStore {
         await artifact.runner.runAction(data, isStreaming);
       }
 
-      this.#editorStore.updateFile(fullPath, data.action?.content ?? '');
+      this.#editorStore.updateFile(fullPath, content);
 
       if (!isStreaming && data.action?.content)  {
         await this.saveFile(fullPath);
