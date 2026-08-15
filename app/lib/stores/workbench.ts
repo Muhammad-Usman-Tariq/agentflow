@@ -517,12 +517,11 @@ export class WorkbenchStore {
   async _addAction(data: ActionCallbackData) {
     const { artifactId } = data;
 
-    const artifact = this.#getArtifact(artifactId);
-
+   const artifact = this.#getArtifact(artifactId);
     if (!artifact) {
       unreachable('Artifact not found');
     }
-
+    if (!artifact.runner) return;
     return artifact.runner.addAction(data);
   }
 
@@ -541,7 +540,7 @@ export class WorkbenchStore {
     if (!artifact) {
       unreachable('Artifact not found');
     }
-
+    if (!artifact.runner) return;
     const action = artifact.runner.actions.get()[data.actionId];
 
     if (!action || action.executed) {
