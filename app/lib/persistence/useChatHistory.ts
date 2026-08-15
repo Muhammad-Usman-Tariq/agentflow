@@ -5,57 +5,97 @@ import { type Message } from 'ai';
 import { workbenchStore } from '~/lib/stores/workbench';
 import { webcontainer } from '~/lib/webcontainer';
 import { chatStore } from '~/lib/stores/chat';
-import { chatSaved } from '~/lib/stores/sidebar';
+import { chatSaved, lastSaved } from '~/lib/stores/sidebar';
+
 export const chatId = atom<string | undefined>(undefined);
 export const description = atom<string | undefined>(undefined);
 
+// ── Save ──────────────────────────────────────────────────────────────────────
+
 async function saveToDatabase(id: string, title: string, messages: Message[], files: any) {
   try {
+    console.log('[CHAT SAVE] id:', id, '| title:', title, '| msgs:', messages.length);
+
     const res = await fetch('/api/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify({ id, title, messages, files }),
     });
+
+    const raw = await res.text();
+    console.log('[CHAT SAVE] status:', res.status, '| body:', raw.slice(0, 200));
+
     if (res.ok) {
-      // Signal the sidebar to re-fetch the chat list
+      // Optimistic update: immediately push into sidebar list
+      lastSaved.set({ chat_id: id, title });
+      // Also bump chatSaved to trigger a full DB re-fetch
       chatSaved.set(chatSaved.get() + 1);
+      console.log('[CHAT SAVE] OK — chatSaved =', chatSaved.get());
+    } else {
+      console.error('[CHAT SAVE] Server error', res.status, raw.slice(0, 400));
     }
-  } catch (error) {
-    console.error('Failed to save to database:', error);
+  } catch (err) {
+    console.error('[CHAT SAVE] Network error:', err);
   }
 }
 
+
+// ── Load ──────────────────────────────────────────────────────────────────────
+
 async function loadFromDatabase(id: string) {
   try {
-    const response = await fetch(`/api/projects?id=${id}`);
-    const data = await response.json() as { project: any };
+    const res = await fetch(`/api/projects?id=${encodeURIComponent(id)}`, {
+      credentials: 'same-origin',
+    });
+    const data = await res.json() as { project: any };
+    console.log('[CHAT LOAD] id:', id, '| found:', !!data.project, '| title:', data.project?.title);
     return data.project || null;
-  } catch (error) {
-    console.error('Failed to load from database:', error);
+  } catch (err) {
+    console.error('[CHAT LOAD] Error:', err);
     return null;
   }
 }
+
+// ── Title helper ──────────────────────────────────────────────────────────────
+
+function deriveTitle(messages: Message[]): string | undefined {
+  const first = messages.find((m) => m.role === 'user');
+  if (!first) return undefined;
+
+  let text = '';
+  if (typeof first.content === 'string') {
+    text = first.content;
+  } else if (Array.isArray(first.content)) {
+    text = (first.content as any[])
+      .filter((p: any) => p.type === 'text')
+      .map((p: any) => p.text as string)
+      .join(' ');
+  }
+
+  text = text.trim();
+  if (!text) return undefined;
+  return text.length > 60 ? text.slice(0, 60) + '...' : text;
+}
+
+// ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useChatHistory() {
   const navigate = useNavigate();
   const params = useParams();
   const loaderData = useLoaderData<{ id?: string }>();
   const mixedId = params.id || loaderData?.id;
- 
-
-
 
   const [initialMessages, setInitialMessages] = useState<Message[]>([]);
   const [ready, setReady] = useState<boolean>(false);
+
   useEffect(() => {
-     
     if (!mixedId) {
       setReady(true);
       return;
     }
 
     (async () => {
-      // ✅ Reset everything before loading new chat
       setReady(false);
       setInitialMessages([]);
       workbenchStore.files.set({});
@@ -63,104 +103,88 @@ export function useChatHistory() {
       description.set(undefined);
       chatId.set(undefined);
 
-      // Clear WebContainer files
+      // Clear WebContainer filesystem
       try {
         const container = await webcontainer;
         const entries = await container.fs.readdir('/', { withFileTypes: true });
         for (const entry of entries) {
           if (entry.name !== 'node_modules') {
-            try {
-              await container.fs.rm('/' + entry.name, { recursive: true });
-            } catch {}
+            try { await container.fs.rm('/' + entry.name, { recursive: true }); } catch {}
           }
         }
       } catch {}
-      
+
       const project = await loadFromDatabase(mixedId);
-      console.log('🔍 RAW project:', JSON.stringify(project).substring(0, 300));
-      console.log('🔍 Project:', project?.title, '| Files:', project?.files ? Object.keys(project.files).length : 0);
-      console.log('🔍 Project loaded:', project?.title);
-      console.log('🔍 Project files:', project?.files);
-      console.log('🔍 Files type:', typeof project?.files);
 
       if (!project) {
+        console.warn('[CHAT LOAD] Not found — redirecting to /');
         navigate('/', { replace: true });
         setReady(true);
         return;
       }
 
-      const messages = (typeof project.messages === 'string' ? JSON.parse(project.messages) : project.messages) as Message[];
-      const files = typeof project.files === 'string' ? JSON.parse(project.files) : project.files;
+      const messages = (
+        typeof project.messages === 'string' ? JSON.parse(project.messages) : project.messages
+      ) as Message[];
+
+      const files =
+        typeof project.files === 'string' ? JSON.parse(project.files) : project.files;
 
       setInitialMessages(messages);
       description.set(project.title);
       chatId.set(mixedId);
-      console.log('🔍 Files check:', files, typeof files, files ? Object.keys(files).length : 'null');
+
+      // Restore files into WebContainer
       if (files && Object.keys(files).length > 0) {
-          console.log('🔍 Files from DB:', Object.keys(files));
-           console.log('🔍 Files count:', Object.keys(files).length);
+        console.log('[CHAT LOAD] Restoring', Object.keys(files).length, 'files');
         try {
           const container = await webcontainer;
           const fileMap: Record<string, any> = {};
+
           for (const [rawPath, fileData] of Object.entries(files as Record<string, any>)) {
-            if (fileData?.type !== 'file') continue;
+            if ((fileData as any)?.type !== 'file') continue;
 
-            let storePath = rawPath
-            .replace('/home/project/', '')  // hardcode workdir
-            .replace(/^\/+/, '');
+            const storePath = rawPath
+              .replace('/home/project/', '')
+              .replace(/^\/+/, '');
 
-            const content = fileData.content ?? '';
-
-            fileMap[storePath] = {
-              type: 'file' as const,
-              content,
-              isBinary: false,
-            };
+            const content = (fileData as any).content ?? '';
+            fileMap[storePath] = { type: 'file' as const, content, isBinary: false };
 
             const fsPath = '/' + storePath;
             try {
               const dir = fsPath.substring(0, fsPath.lastIndexOf('/'));
-              if (dir && dir !== '/') {
-                await container.fs.mkdir(dir, { recursive: true });
-              }
+              if (dir && dir !== '/') await container.fs.mkdir(dir, { recursive: true });
               await container.fs.writeFile(fsPath, content, { encoding: 'utf8' });
             } catch (e) {
-              console.error('Failed to write:', fsPath, e);
+              console.error('[CHAT LOAD] Write failed:', fsPath, e);
             }
           }
 
-          // Inject into workbench store
           for (const [path, dirent] of Object.entries(fileMap)) {
             workbenchStore.files.setKey(path, dirent);
           }
           workbenchStore.setDocuments(fileMap);
           workbenchStore.showWorkbench.set(true);
-          console.log('🔍 Workbench set TRUE, fileMap:', Object.keys(fileMap));
           chatStore.setKey('started', true);
-          console.log('✅ Files loaded:', Object.keys(fileMap).length);
+          console.log('[CHAT LOAD] Files restored:', Object.keys(fileMap).length);
 
           // Start dev server
           try {
-            const hasPackageJson = fileMap['package.json'] !== undefined;
-            if (hasPackageJson) {
-              const installProc = await container.spawn('npm', ['install']);
-              await installProc.exit;
-              const devProc = await container.spawn('npm', ['run', 'dev']);
-              devProc.output.pipeTo(
-                new WritableStream({ write(data) { console.log('[dev]', data); } })
-              );
+            if (fileMap['package.json']) {
+              const inst = await container.spawn('npm', ['install']);
+              await inst.exit;
+              const dev = await container.spawn('npm', ['run', 'dev']);
+              dev.output.pipeTo(new WritableStream({ write(d) { console.log('[dev]', d); } }));
             } else {
-              const serveProc = await container.spawn('npx', ['-y', 'serve', '.', '--listen', '3000']);
-              serveProc.output.pipeTo(
-                new WritableStream({ write(data) { console.log('[serve]', data); } })
-              );
+              const srv = await container.spawn('npx', ['-y', 'serve', '.', '--listen', '3000']);
+              srv.output.pipeTo(new WritableStream({ write(d) { console.log('[serve]', d); } }));
             }
           } catch (e) {
-            console.error('Failed to start dev server:', e);
+            console.error('[CHAT LOAD] Dev server error:', e);
           }
-
         } catch (e) {
-          console.error('WebContainer error:', e);
+          console.error('[CHAT LOAD] WebContainer error:', e);
         }
       }
 
@@ -178,25 +202,18 @@ export function useChatHistory() {
 
       const { firstArtifact } = workbenchStore;
 
+      // Priority 1: artifact title
       if (!description.get() && firstArtifact?.title) {
         description.set(firstArtifact.title);
       }
 
-      // Fallback: derive a short title from the first user message
+      // Priority 2: first user message text
       if (!description.get()) {
-        const firstUserMsg = messages.find((m) => m.role === 'user');
-        if (firstUserMsg) {
-          const text = typeof firstUserMsg.content === 'string'
-            ? firstUserMsg.content
-            : Array.isArray(firstUserMsg.content)
-              ? (firstUserMsg.content as any[]).filter((p: any) => p.type === 'text').map((p: any) => p.text).join(' ')
-              : '';
-          if (text.trim()) {
-            description.set(text.trim().slice(0, 60) + (text.trim().length > 60 ? '…' : ''));
-          }
-        }
+        const derived = deriveTitle(messages);
+        if (derived) description.set(derived);
       }
 
+      // Assign a stable ID for new chats
       if (!chatId.get()) {
         const newId = String(Date.now());
         chatId.set(newId);
@@ -208,9 +225,12 @@ export function useChatHistory() {
       const finalChatId = chatId.get();
       if (!finalChatId) return;
 
+      const title = description.get() || 'Untitled Project';
+      console.log('[CHAT STORE] Saving:', finalChatId, '|', title);
+
       await saveToDatabase(
         finalChatId,
-        description.get() || 'Untitled Project',
+        title,
         messages,
         workbenchStore.files.get()
       );

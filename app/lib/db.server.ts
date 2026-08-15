@@ -56,8 +56,61 @@ export async function query(text: string, params?: any[], env?: Record<string, s
 }
 
 // ══════════════════════════════════════
-// Saari functions — env parameter add
+// Schema bootstrap — runs once per cold start
 // ══════════════════════════════════════
+
+let _schemaReady = false;
+
+export async function ensureSchema(env?: Record<string, string>) {
+  if (_schemaReady) return;
+  try {
+    // Create users table
+    await query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        name TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `, [], env);
+
+    // Create projects table (without user_id first — safe if it already exists)
+    await query(`
+      CREATE TABLE IF NOT EXISTS projects (
+        id SERIAL PRIMARY KEY,
+        chat_id TEXT UNIQUE NOT NULL,
+        title TEXT NOT NULL DEFAULT 'Untitled Project',
+        messages JSONB NOT NULL DEFAULT '[]',
+        files JSONB NOT NULL DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `, [], env);
+
+    // Add user_id column if it doesn't exist (idempotent)
+    await query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'projects' AND column_name = 'user_id'
+        ) THEN
+          ALTER TABLE projects ADD COLUMN user_id TEXT;
+          CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
+        END IF;
+      END
+      $$
+    `, [], env);
+
+    _schemaReady = true;
+    console.log('[DB] Schema ready');
+  } catch (e) {
+    console.error('[DB] ensureSchema error:', e);
+    // Don't block — maybe partial schema is fine
+  }
+}
 
 export async function saveProject(id: string, title: string, messages: any[], files: any, env?: Record<string, string>) {
   const messagesJson = typeof messages === 'string' ? messages : JSON.stringify(messages || []);
@@ -162,8 +215,12 @@ export async function emailExists(email: string, env?: Record<string, string>): 
 }
 
 export async function saveProjectForUser(id: string, title: string, messages: any[], files: any, userId: string, env?: Record<string, string>) {
+  await ensureSchema(env);
+
   const messagesJson = typeof messages === 'string' ? messages : JSON.stringify(messages || []);
   const filesJson = typeof files === 'string' ? files : JSON.stringify(files || {});
+
+  console.log('[DB saveProject] chat_id:', id, '| user_id:', userId, '| title:', title);
 
   try {
     const result = await query(
@@ -175,47 +232,70 @@ export async function saveProjectForUser(id: string, title: string, messages: an
       [id, title, messagesJson, filesJson, userId],
       env
     );
+    console.log('[DB saveProject] Saved row id:', result.rows[0]?.id);
     return result.rows[0];
-  } catch (e) {
-    const check = await query(`SELECT id FROM projects WHERE chat_id = $1`, [id], env);
-    if (check.rows.length > 0) {
-      const updateResult = await query(
-        `UPDATE projects SET title = $1, messages = $2, files = $3, user_id = $4, updated_at = NOW()
-         WHERE chat_id = $5 RETURNING *`,
-        [title, messagesJson, filesJson, userId, id],
-        env
-      );
-      return updateResult.rows[0];
-    } else {
-      const insertResult = await query(
-        `INSERT INTO projects (chat_id, title, messages, files, user_id, updated_at)
-         VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *`,
-        [id, title, messagesJson, filesJson, userId],
-        env
-      );
-      return insertResult.rows[0];
+  } catch (e: any) {
+    console.error('[DB saveProject] Primary upsert failed:', e?.message);
+    try {
+      const check = await query(`SELECT id FROM projects WHERE chat_id = $1`, [id], env);
+      if (check.rows.length > 0) {
+        const updateResult = await query(
+          `UPDATE projects SET title = $1, messages = $2, files = $3, user_id = $4, updated_at = NOW()
+           WHERE chat_id = $5 RETURNING *`,
+          [title, messagesJson, filesJson, userId, id],
+          env
+        );
+        console.log('[DB saveProject] Fallback UPDATE ok, id:', updateResult.rows[0]?.id);
+        return updateResult.rows[0];
+      } else {
+        const insertResult = await query(
+          `INSERT INTO projects (chat_id, title, messages, files, user_id, updated_at)
+           VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *`,
+          [id, title, messagesJson, filesJson, userId],
+          env
+        );
+        console.log('[DB saveProject] Fallback INSERT ok, id:', insertResult.rows[0]?.id);
+        return insertResult.rows[0];
+      }
+    } catch (e2: any) {
+      console.error('[DB saveProject] All fallbacks failed:', e2?.message);
+      throw e2;
     }
   }
 }
 
 export async function getProjectForUser(id: string, userId: string, env?: Record<string, string>) {
-  const result = await query(
-    `SELECT * FROM projects WHERE (chat_id = $1 OR id::text = $1) AND user_id = $2`,
-    [id, userId],
-    env
-  );
-  return result.rows[0];
+  await ensureSchema(env);
+  try {
+    const result = await query(
+      `SELECT * FROM projects WHERE (chat_id = $1 OR id::text = $1) AND user_id = $2`,
+      [id, userId],
+      env
+    );
+    console.log('[DB getProject] id:', id, '| user_id:', userId, '| found:', result.rows.length);
+    return result.rows[0];
+  } catch (e: any) {
+    console.error('[DB getProject] Error:', e?.message);
+    return null;
+  }
 }
 
 export async function getAllProjectsForUser(userId: string, env?: Record<string, string>) {
-  const result = await query(
-    `SELECT id, chat_id, title, created_at, updated_at
-     FROM projects WHERE user_id = $1
-     ORDER BY updated_at DESC`,
-    [userId],
-    env
-  );
-  return result.rows;
+  await ensureSchema(env);
+  try {
+    const result = await query(
+      `SELECT id, chat_id, title, created_at, updated_at
+       FROM projects WHERE user_id = $1
+       ORDER BY updated_at DESC`,
+      [userId],
+      env
+    );
+    console.log('[DB getAllProjects] user_id:', userId, '| count:', result.rows.length);
+    return result.rows;
+  } catch (e: any) {
+    console.error('[DB getAllProjects] Error:', e?.message);
+    return [];
+  }
 }
 
 export async function deleteProjectForUser(chatId: string, userId: string, env?: Record<string, string>) {

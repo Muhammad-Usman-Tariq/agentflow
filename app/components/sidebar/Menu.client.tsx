@@ -1,9 +1,9 @@
-import { useEffect, useState, useCallback } from 'react';
+﻿import { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useLocation } from '@remix-run/react';
 import { toast } from 'react-toastify';
 import { classNames } from '~/utils/classNames';
 import { useStore } from '@nanostores/react';
-import { sidebarOpen, chatSaved } from '~/lib/stores/sidebar';
+import { sidebarOpen, chatSaved, lastSaved } from '~/lib/stores/sidebar';
 import { DeployHub } from '~/components/deploy/DeployHub';
 
 interface Chat {
@@ -16,27 +16,54 @@ interface Chat {
 
 export function Menu() {
   const isOpen = useStore(sidebarOpen);
-  const savedCount = useStore(chatSaved);  // triggers re-fetch on save
+  const savedCount = useStore(chatSaved);
+  const newSave = useStore(lastSaved);
   const navigate = useNavigate();
   const location = useLocation();
   const isGuest = location.pathname === '/guest';
   const [list, setList] = useState<Chat[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showConnectors, setShowConnectors] = useState(false);
+  const [loading, setLoading] = useState(false);
 
+  // ── Full fetch from DB ──────────────────────────────────────────────────────
   const loadEntries = useCallback(async () => {
+    setLoading(true);
     try {
-      const response = await fetch('/api/projects');
+      console.log('[SIDEBAR] Fetching /api/projects...');
+      const response = await fetch('/api/projects', { credentials: 'same-origin' });
       const data = await response.json() as { projects: Chat[] };
+      console.log('[SIDEBAR] Got', data.projects?.length ?? 0, 'projects');
       setList(data.projects || []);
     } catch (error) {
-      console.error('Failed to load projects:', error);
+      console.error('[SIDEBAR] Failed to load projects:', error);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
+  // Re-fetch when route changes or DB save is confirmed
   useEffect(() => {
     loadEntries();
   }, [loadEntries, location.pathname, savedCount]);
+
+  // Optimistic update: insert new chat immediately when lastSaved changes
+  useEffect(() => {
+    if (!newSave) return;
+    console.log('[SIDEBAR] Optimistic insert:', newSave.chat_id, newSave.title);
+    setList((prev) => {
+      // Remove if already exists (avoid duplicates), then prepend
+      const filtered = prev.filter((c) => c.chat_id !== newSave.chat_id);
+      const optimistic: Chat = {
+        id: 0,
+        chat_id: newSave.chat_id,
+        title: newSave.title,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      return [optimistic, ...filtered];
+    });
+  }, [newSave]);
 
   const filteredList = list.filter((chat) =>
     chat.title?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -44,11 +71,16 @@ export function Menu() {
 
   const deleteChat = useCallback(async (id: string) => {
     try {
-      const response = await fetch(`/api/projects?id=${id}`, { method: 'DELETE' });
+      const response = await fetch(`/api/projects?id=${id}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
       if (response.ok) {
-        setList(prev => prev.filter(
-          chat => String(chat.id) !== String(id) && String(chat.chat_id) !== String(id)
-        ));
+        setList(prev =>
+          prev.filter(
+            chat => String(chat.id) !== String(id) && String(chat.chat_id) !== String(id)
+          )
+        );
         toast.success('Chat deleted');
       }
     } catch (error) {
@@ -98,7 +130,6 @@ export function Menu() {
         {/* Primary Action */}
         <button
           onClick={() => {
-            // In guest mode go to /guest; for logged-in users go to /
             window.location.href = isGuest ? '/guest' : '/';
           }}
           className="bg-[#1a1a1a] text-white font-medium text-[13px] px-4 py-2 rounded-lg hover:bg-black/90 transition-all flex items-center justify-center gap-2 w-full shrink-0 shadow-sm active:scale-[0.98]"
@@ -130,19 +161,31 @@ export function Menu() {
 
         {/* Chat List */}
         <div className="flex-1 overflow-y-auto mt-2 pr-1 space-y-1">
-          <p className="font-[#JetBrains_Mono,monospace] text-[11px] font-semibold text-[#9d9893] uppercase tracking-wider mb-2 pl-2">
-            RECENT CHATS
-          </p>
+          <div className="flex items-center justify-between mb-2 pl-2 pr-1">
+            <p className="font-[#JetBrains_Mono,monospace] text-[11px] font-semibold text-[#9d9893] uppercase tracking-wider">
+              RECENT CHATS
+            </p>
+            <button
+              onClick={loadEntries}
+              className="text-[#9d9893] hover:text-[#a93011] transition-colors"
+              title="Refresh chat list"
+            >
+              <div className={classNames('i-ph:arrows-clockwise text-[14px]', { 'animate-spin': loading })} />
+            </button>
+          </div>
 
           {filteredList.length === 0 ? (
             <div className="text-center text-[#9d9893] py-6 text-[13px]">
-              No projects yet
+              {loading ? 'Loading...' : 'No projects yet'}
             </div>
           ) : (
             filteredList.map((chat) => (
               <div
                 key={chat.chat_id || chat.id}
-                onClick={() => navigate(`/chat/${chat.chat_id || chat.id}`)}
+                onClick={() => {
+                  navigate(`/chat/${chat.chat_id || chat.id}`);
+                  sidebarOpen.set(false);
+                }}
                 className="group flex items-center gap-2.5 text-[#59413b] hover:text-[#a93011] hover:bg-[#f0e6e0] px-3 py-2 rounded-lg transition-colors cursor-pointer relative"
               >
                 <div className="i-ph:chat-circle text-[18px] text-[#9d9893] group-hover:text-[#a93011]" />
@@ -182,10 +225,10 @@ export function Menu() {
         </div>
       </nav>
 
-      {/* Connectors Modal — Deploy + Social */}
+      {/* Connectors Modal */}
       {showConnectors && (
         <DeployHub onClose={() => setShowConnectors(false)} />
       )}
     </>
   );
-}
+}
