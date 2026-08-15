@@ -5,16 +5,21 @@ import { type Message } from 'ai';
 import { workbenchStore } from '~/lib/stores/workbench';
 import { webcontainer } from '~/lib/webcontainer';
 import { chatStore } from '~/lib/stores/chat';
+import { chatSaved } from '~/lib/stores/sidebar';
 export const chatId = atom<string | undefined>(undefined);
 export const description = atom<string | undefined>(undefined);
 
 async function saveToDatabase(id: string, title: string, messages: Message[], files: any) {
   try {
-    await fetch('/api/projects', {
+    const res = await fetch('/api/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, title, messages, files }),
     });
+    if (res.ok) {
+      // Signal the sidebar to re-fetch the chat list
+      chatSaved.set(chatSaved.get() + 1);
+    }
   } catch (error) {
     console.error('Failed to save to database:', error);
   }
@@ -175,6 +180,21 @@ export function useChatHistory() {
 
       if (!description.get() && firstArtifact?.title) {
         description.set(firstArtifact.title);
+      }
+
+      // Fallback: derive a short title from the first user message
+      if (!description.get()) {
+        const firstUserMsg = messages.find((m) => m.role === 'user');
+        if (firstUserMsg) {
+          const text = typeof firstUserMsg.content === 'string'
+            ? firstUserMsg.content
+            : Array.isArray(firstUserMsg.content)
+              ? (firstUserMsg.content as any[]).filter((p: any) => p.type === 'text').map((p: any) => p.text).join(' ')
+              : '';
+          if (text.trim()) {
+            description.set(text.trim().slice(0, 60) + (text.trim().length > 60 ? '…' : ''));
+          }
+        }
       }
 
       if (!chatId.get()) {

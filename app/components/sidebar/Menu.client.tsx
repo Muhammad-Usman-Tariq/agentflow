@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from '@remix-run/react';
 import { toast } from 'react-toastify';
 import { classNames } from '~/utils/classNames';
 import { useStore } from '@nanostores/react';
-import { sidebarOpen } from '~/lib/stores/sidebar';
+import { sidebarOpen, chatSaved } from '~/lib/stores/sidebar';
 import { DeployHub } from '~/components/deploy/DeployHub';
 
 interface Chat {
@@ -16,6 +16,7 @@ interface Chat {
 
 export function Menu() {
   const isOpen = useStore(sidebarOpen);
+  const savedCount = useStore(chatSaved);  // triggers re-fetch on save
   const navigate = useNavigate();
   const location = useLocation();
   const isGuest = location.pathname === '/guest';
@@ -35,7 +36,7 @@ export function Menu() {
 
   useEffect(() => {
     loadEntries();
-  }, [loadEntries, location.pathname]);
+  }, [loadEntries, location.pathname, savedCount]);
 
   const filteredList = list.filter((chat) =>
     chat.title?.toLowerCase().includes(searchQuery.toLowerCase())
