@@ -3,7 +3,7 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import type { BundledLanguage } from 'shiki';
 import { createScopedLogger } from '~/utils/logger';
 import { rehypePlugins, remarkPlugins, allowedHTMLElements } from '~/utils/markdown';
-import { Artifact, openArtifactInWorkbench } from './Artifact';
+import { openArtifactInWorkbench } from './Artifact';
 import { CodeBlock } from './CodeBlock';
 import type { Message } from 'ai';
 import styles from './Markdown.module.scss';
@@ -33,18 +33,18 @@ export const Markdown = memo(
           const dataProps = node?.properties as Record<string, unknown>;
 
           if (className?.includes('__boltArtifact__')) {
-            const messageId = node?.properties.dataMessageId as string;
-            const artifactId = node?.properties.dataArtifactId as string;
-
-            if (!messageId) {
-              logger.error(`Invalid message id ${messageId}`);
-            }
-
-            if (!artifactId) {
-              logger.error(`Invalid artifact id ${artifactId}`);
-            }
-
-            return <Artifact messageId={messageId} artifactId={artifactId} />;
+            // ⚠️ FIX: per product requirement — chat should show conversation text
+            // only; generated code is meant to be viewed exclusively via the AGENT
+            // tab/workbench, not inline in the chat. This ONLY removes the inline
+            // card from the chat message — it does NOT touch how files get written.
+            // workbenchStore.addArtifact/addAction/runAction (the code that actually
+            // populates the file tree the AGENT tab reads from) run in
+            // useMessageParser.ts's onArtifactOpen/onActionOpen/onActionClose
+            // callbacks, which fire independently of this component ever rendering
+            // anything — so the AGENT tab / file browser / deploy / social-post
+            // features (which all read from workbenchStore directly, not from this
+            // chat markdown) are completely unaffected.
+            return null;
           }
 
           if (className?.includes('__boltSelectedElement__')) {

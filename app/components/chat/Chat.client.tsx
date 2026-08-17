@@ -123,6 +123,11 @@ export const ChatImpl = memo(
     const [agentRunId, setAgentRunId] = useState<number | null>(null);
     const [agentRunning, setAgentRunning] = useState(false);
 
+    // ⚠️ FIX: holds the message that's waiting for the backend orchestrator (/api/agent)
+    // once the main /api/chat stream finishes — see onFinish below. This is what lets us
+    // sequence the two LLM calls instead of firing them at the same instant.
+    const pendingAgentMessageRef = useRef<string | null>(null);
+
     const {
       messages,
       isLoading,
@@ -151,6 +156,9 @@ export const ChatImpl = memo(
       sendExtraMessageFields: true,
       onError: (e) => {
         setFakeLoading(false);
+        // If chat generation itself failed (e.g. rate/token limit), don't also fire
+        // the agent for this message — it would just add to the same problem.
+        pendingAgentMessageRef.current = null;
         handleError(e, 'chat');
       },
       onFinish: (message, response) => {
@@ -170,6 +178,21 @@ export const ChatImpl = memo(
         }
 
         logger.debug('Finished streaming');
+
+        // ⚠️ FIX: run the backend orchestrator (/api/agent — which itself makes at
+        // least one LLM call for planning, and more if it decides backend work is
+        // needed) only AFTER the main /api/chat stream is fully done, instead of at
+        // the same instant sendMessage() fires. Both calls hit the same Groq
+        // free-tier TPM budget; firing them together was bursting past that limit
+        // even for trivial prompts. Sequencing spreads the same total tokens across
+        // a longer window instead of consuming them all at once. The agent itself
+        // is untouched — it still runs on every message, still decides what (if
+        // anything) backend-related is needed; only the timing changed.
+        if (pendingAgentMessageRef.current) {
+          const contentForAgent = pendingAgentMessageRef.current;
+          pendingAgentMessageRef.current = null;
+          runAgent(contentForAgent);
+        }
       },
       initialMessages,
       initialInput: '',
@@ -495,8 +518,9 @@ export const ChatImpl = memo(
         content: messageContent,
         parts: createMessageParts(messageContent, imageDataList), 
         });
-      // Run agent in background
-      runAgent(messageContent);
+      // ⚠️ FIX: don't fire the backend agent right now — queue it, it'll run in
+      // onFinish once /api/chat's stream completes (see comment there for why).
+      pendingAgentMessageRef.current = messageContent;
 
       runAnimation();
 
