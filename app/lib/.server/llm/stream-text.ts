@@ -71,10 +71,15 @@ export async function streamText(props: {
 
   logger.info(`Using Provider: ${currentProvider}, Model: ${currentModel}, Key: ${currentApiKey ? 'SET' : 'MISSING'}`);
 
-  const finalApiKeys: Record<string, string> = {
-    [currentProvider]: currentApiKey,
-    ...apiKeys,
-  };
+  // ⚠️ FIX: this is the final choke point before the LLM call, so it's the last line
+  // of defense — the env-configured provider's key ALWAYS comes from env, full stop.
+  // Any caller-supplied `apiKeys` (there shouldn't be any now that api.chat.ts and
+  // api.llmcall.ts no longer read cookies) can only ever apply to a DIFFERENT
+  // provider than the one .env configures; they can never override it.
+  const finalApiKeys: Record<string, string> = { ...apiKeys };
+  if (currentProvider) {
+    finalApiKeys[currentProvider] = currentApiKey;
+  }
 
   let processedMessages = messages.map((message) => {
     const newMessage = { ...message };

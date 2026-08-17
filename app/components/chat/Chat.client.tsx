@@ -201,7 +201,24 @@ export const ChatImpl = memo(
       parseMessages(messages, isLoading);
 
       if (messages.length > initialMessages.length) {
-        storeMessageHistory(messages, workbenchStore.files.get()).catch((error) => toast.error(error.message));
+        // ⚠️ FIX: when isLoading flips to false, parseMessages() (see useMessageParser.ts)
+        // resets the parser and defers the actual artifact/action parse via setTimeout(0)
+        // — that deferred pass is what populates workbenchStore.files for the first time
+        // for actions that only finished right at the very end of a fast/short stream.
+        // Reading workbenchStore.files.get() synchronously right here (same tick) can
+        // capture it BEFORE that population happens, so the DB save goes out with an
+        // empty files object and never gets corrected. Since setTimeout(0) callbacks run
+        // in registration order, scheduling this save in its own setTimeout(0) — right
+        // after calling parseMessages — guarantees it runs after the deferred parse.
+        const persist = () => {
+          storeMessageHistory(messages, workbenchStore.files.get()).catch((error) => toast.error(error.message));
+        };
+
+        if (!isLoading) {
+          setTimeout(persist, 0);
+        } else {
+          persist();
+        }
       }
     }, [messages, isLoading, parseMessages]);
 

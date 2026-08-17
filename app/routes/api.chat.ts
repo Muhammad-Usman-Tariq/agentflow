@@ -21,23 +21,8 @@ export async function action(args: ActionFunctionArgs) {
 
 const logger = createScopedLogger('api.chat');
 
-function parseCookies(cookieHeader: string): Record<string, string> {
-  const cookies: Record<string, string> = {};
-
-  const items = cookieHeader.split(';').map((cookie) => cookie.trim());
-
-  items.forEach((item) => {
-    const [name, ...rest] = item.split('=');
-
-    if (name && rest) {
-      const decodedName = decodeURIComponent(name.trim());
-      const decodedValue = decodeURIComponent(rest.join('=').trim());
-      cookies[decodedName] = decodedValue;
-    }
-  });
-
-  return cookies;
-}
+// NOTE: parseCookies was removed — this route no longer reads any cookie for
+// model/provider/key selection. See the comment above `apiKeys` in chatAction().
 
 async function chatAction({ context, request }: ActionFunctionArgs) {
   const streamRecovery = new StreamRecoveryManager({
@@ -48,7 +33,7 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
     },
   });
 
-  const { messages, files, promptId, contextOptimization, supabase, chatMode, designScheme, maxLLMSteps, apiKeys: clientApiKeys } =
+  const { messages, files, promptId, contextOptimization, supabase, chatMode, designScheme, maxLLMSteps } =
     await request.json<{
       messages: Messages;
       files: any;
@@ -58,25 +43,23 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
       designScheme?: DesignScheme;
       supabase?: any;
       maxLLMSteps: number;
-      apiKeys?: Record<string, string>;
     }>();
 
-  const cookieHeader = request.headers.get('Cookie');
-  const cookies = parseCookies(cookieHeader || '');
-  const cookieApiKeys = JSON.parse(cookies.apiKeys || '{}');
-
+  // ⚠️ FIX: no cookies, no client input — model/provider/key come from .env ONLY.
+  // This app's entire design is "set PROVIDER_NAME / PROVIDER_API_KEY / DEFAULT_MODEL
+  // in .env and it just works" — there is no UI where the user picks a model or types
+  // a key (ModelSelector isn't even rendered in BaseChat), so reading `apiKeys`/
+  // `providers` cookies here was dead legacy code inherited from upstream bolt.diy's
+  // BYOK feature. It could never help, and could only ever cause bugs (e.g. a stray
+  // leftover cookie silently overriding the .env key). Removed entirely.
   const env = (context.cloudflare?.env as unknown) as Record<string, string> || {};
   const providerName = env.PROVIDER_NAME || '';
 
-  const apiKeys: Record<string, string> = {
-    [providerName]: env.PROVIDER_API_KEY || '',
-    ...cookieApiKeys,
-    ...(clientApiKeys || {}),
-  };
+  const apiKeys: Record<string, string> = providerName && env.PROVIDER_API_KEY
+    ? { [providerName]: env.PROVIDER_API_KEY }
+    : {};
 
-  const providerSettings: Record<string, IProviderSetting> = JSON.parse(
-    cookies.providers || '{}',
-  );
+  const providerSettings: Record<string, IProviderSetting> = {};
 
   const stream = new SwitchableStream();
 

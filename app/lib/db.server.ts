@@ -3,16 +3,25 @@
 let _pool: any = null;
 let _sql: any = null;
 
-function isCloudflare() {
-  // Cloudflare Workers mein process.versions nahi hota
-  return typeof process === 'undefined' || !process.versions?.node;
+function isCloudflare(env?: Record<string, string>) {
+  // ⚠️ NOTE: process.versions.node CANNOT be trusted here — vite-plugin-node-polyfills
+  // injects a fake `process` global (with a fake process.versions.node string) into the
+  // Cloudflare Workers bundle too, so that old check always resolved to `false` on
+  // production and silently routed every query through the broken `pg` (TCP) driver.
+  //
+  // Reliable signals instead:
+  // 1. Cloudflare Pages always injects CF_PAGES=1 into the environment.
+  // 2. Cloudflare Workers runtime always sets navigator.userAgent to 'Cloudflare-Workers'.
+  if (env?.CF_PAGES) return true;
+  if (typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers') return true;
+  return false;
 }
 
 async function getDb(env?: Record<string, string>) {
   const url = env?.DATABASE_URL || process.env?.DATABASE_URL || '';
   if (!url) throw new Error('DATABASE_URL not set');
 
-  if (isCloudflare()) {
+  if (isCloudflare(env)) {
     // ✅ Cloudflare — neon serverless
     if (!_sql) {
       const { neon } = await import('@neondatabase/serverless');

@@ -6,7 +6,6 @@ import { PROVIDER_LIST } from '~/utils/constants';
 import { MAX_TOKENS, PROVIDER_COMPLETION_LIMITS, isReasoningModel } from '~/lib/.server/llm/constants';
 import { LLMManager } from '~/lib/modules/llm/manager';
 import type { ModelInfo } from '~/lib/modules/llm/types';
-import { getApiKeysFromCookie, getProviderSettingsFromCookie } from '~/lib/api/cookies';
 import { createScopedLogger } from '~/utils/logger';
 
 export async function action(args: ActionFunctionArgs) {
@@ -65,39 +64,45 @@ function validateTokenLimits(modelDetails: ModelInfo, requestedTokens: number): 
 }
 
 async function llmCallAction({ context, request }: ActionFunctionArgs) {
-  const { system, message, model, provider, streamOutput } = await request.json<{
+  // ⚠️ FIX: no cookies, no client-supplied model/provider — this route (used only by
+  // selectStarterTemplate for auto template selection) now depends on .env exclusively,
+  // same as api.chat.ts. There is no UI for the user to pick a model, so honoring
+  // client input or cookies here could only ever cause bugs, never help. `system` and
+  // `message` are still read from the request body (that's the actual prompt content);
+  // any `model`/`provider` fields the client sends are ignored on purpose.
+  const { system, message } = await request.json<{
     system: string;
     message: string;
-    model: string;
-    provider: ProviderInfo;
+    model?: string;
+    provider?: ProviderInfo;
     streamOutput?: boolean;
   }>();
+  const streamOutput = false; // this route's only caller (selectStarterTemplate) never streams
 
-  const { name: providerName } = provider;
+  const env = (context.cloudflare?.env as unknown) as Record<string, string> || {};
 
-  // validate 'model' and 'provider' fields
+  const model = env.DEFAULT_MODEL;
+  const providerName = env.PROVIDER_NAME;
+  const provider = { name: providerName } as ProviderInfo;
+
   if (!model || typeof model !== 'string') {
-    throw new Response('Invalid or missing model', {
+    throw new Response('Server misconfiguration: DEFAULT_MODEL is not set in .env', {
       status: 400,
       statusText: 'Bad Request',
     });
   }
 
   if (!providerName || typeof providerName !== 'string') {
-    throw new Response('Invalid or missing provider', {
+    throw new Response('Server misconfiguration: PROVIDER_NAME is not set in .env', {
       status: 400,
       statusText: 'Bad Request',
     });
   }
 
-  const cookieHeader = request.headers.get('Cookie');
-  const apiKeys = getApiKeysFromCookie(cookieHeader);
-  const providerSettings = getProviderSettingsFromCookie(cookieHeader);
-  const env = (context.cloudflare?.env as unknown) as Record<string, string> || {};
-  const envProviderName = env.PROVIDER_NAME || 'OpenRouter';
-  if (env.PROVIDER_API_KEY) {
-  apiKeys[envProviderName] = env.PROVIDER_API_KEY;
-}
+  const apiKeys: Record<string, string> = env.PROVIDER_API_KEY
+    ? { [providerName]: env.PROVIDER_API_KEY }
+    : {};
+  const providerSettings: Record<string, IProviderSetting> = {};
   if (streamOutput) {
     try {
       const result = await streamText({
