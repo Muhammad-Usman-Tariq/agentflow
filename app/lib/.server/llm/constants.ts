@@ -13,21 +13,21 @@ export const PROVIDER_COMPLETION_LIMITS: Record<string, number> = {
   OpenAI: 4096, // Standard GPT models (o1 models have much higher limits)
   Github: 4096, // GitHub Models use OpenAI-compatible limits
   Anthropic: 64000, // Conservative limit for Claude 4 models (Opus: 32k, Sonnet: 64k)
-  Google: 8192, // Gemini 1.5 Pro/Flash standard limit
+  Google: 3000, // Gemini 1.5 Pro/Flash standard limit
   Cohere: 4000,
-  DeepSeek: 8192,
-  Groq: 8192,
+  DeepSeek: 3000,
+  Groq: 3000,
   HuggingFace: 4096,
-  Mistral: 8192,
-  Ollama: 8192,
-  OpenRouter: 8192,
-  Perplexity: 8192,
-  Together: 8192,
-  xAI: 8192,
-  LMStudio: 8192,
-  OpenAILike: 8192,
-  AmazonBedrock: 8192,
-  Hyperbolic: 8192,
+  Mistral: 3000,
+  Ollama: 3000,
+  OpenRouter: 3000,
+  Perplexity: 3000,
+  Together: 3000,
+  xAI: 3000,
+  LMStudio: 3000,
+  OpenAILike: 3000,
+  AmazonBedrock: 3000,
+  Hyperbolic: 3000,
 };
 
 /*

@@ -103,10 +103,10 @@ export async function streamText(props: {
     name: currentModel,
     provider: currentProvider,
     maxTokenAllowed: 200000,
-    maxCompletionTokens: 8192,
+    maxCompletionTokens: 3000,
   };
 
-  const safeMaxTokens = 8192;
+  const safeMaxTokens = 3000;
 
  logger.info(`Sending llm call to ${provider.name} with model ${modelDetails.name}`);
   console.log('chatMode:', chatMode);
