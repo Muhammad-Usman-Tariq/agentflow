@@ -176,6 +176,9 @@ export function getOpenAILikeModel(baseURL: string, apiKey: OptionalApiKey, mode
   const openai = createOpenAI({
     baseURL,
     apiKey,
+    headers: {
+      'Bypass-Tunnel-Reminder': 'true',
+    },
   });
 
   return openai(model);

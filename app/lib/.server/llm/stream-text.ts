@@ -1,5 +1,5 @@
 import { convertToCoreMessages, streamText as _streamText, type Message } from 'ai';
-import { MAX_TOKENS, PROVIDER_COMPLETION_LIMITS, isReasoningModel, type FileMap } from './constants';
+import { MAX_TOKENS, isReasoningModel, type FileMap } from './constants';
 import { getSystemPrompt } from '~/lib/common/prompts/prompts';
 import { DEFAULT_MODEL, DEFAULT_PROVIDER, MODIFICATIONS_TAG_NAME, PROVIDER_LIST, WORK_DIR } from '~/utils/constants';
 import type { IProviderSetting } from '~/types/model';
@@ -103,10 +103,19 @@ export async function streamText(props: {
     name: currentModel,
     provider: currentProvider,
     maxTokenAllowed: 200000,
-    maxCompletionTokens: 3000,
+    maxCompletionTokens: 8192,
   };
 
-  const safeMaxTokens = 3000;
+  // Completion-token budget for THIS response. This is not something code can figure
+  // out on its own — it depends on the account's rate-limit tier (Groq free tier here
+  // caps at 8000 tokens/min total), which varies per provider AND per account/plan and
+  // can't be discovered in advance. So: one simple, single number, controlled entirely
+  // from .env — set MAX_COMPLETION_TOKENS to whatever fits your account. Default (4000)
+  // is a safe middle ground that fits most free-tier accounts without extra config.
+  const envMaxCompletionTokens = envAny?.MAX_COMPLETION_TOKENS ? parseInt(envAny.MAX_COMPLETION_TOKENS, 10) : NaN;
+  const safeMaxTokens = !isNaN(envMaxCompletionTokens) && envMaxCompletionTokens > 0
+    ? envMaxCompletionTokens
+    : 4000;
 
  logger.info(`Sending llm call to ${provider.name} with model ${modelDetails.name}`);
   console.log('chatMode:', chatMode);
