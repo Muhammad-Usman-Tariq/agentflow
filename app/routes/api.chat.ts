@@ -338,6 +338,13 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
         // Provide more specific error messages for common issues
         const errorMessage = error.message || 'Unknown error';
 
+        // 🔧 TEMP DEBUG (remove after root-cause is found): Cloudflare's real-time
+        // logs UI is unreliable, so surface the FULL raw error directly in the chat
+        // response instead of the generic categorized message below. This bypasses
+        // every if-check below on purpose — do not delete those, just comment/remove
+        // this return once we know the real cause.
+        return `RAW DEBUG ERROR: ${errorMessage} | Full: ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`;
+
         if (errorMessage.includes('model') && errorMessage.includes('not found')) {
           return 'Custom error: Invalid model selected. Please check that the model name is correct and available.';
         }
