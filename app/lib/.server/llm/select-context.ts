@@ -48,7 +48,7 @@ export async function selectContext(props: {
   });
 
   const provider = PROVIDER_LIST.find((p) => p.name === currentProvider) || DEFAULT_PROVIDER;
-  const staticModels = LLMManager.getInstance().getStaticModelListFromProvider(provider);
+  const staticModels = provider.staticModels || [];
   let modelDetails = staticModels.find((m) => m.name === currentModel);
 
   if (!modelDetails) {
