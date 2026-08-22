@@ -1,4 +1,4 @@
-export { s as assets, a as assetsBuildDirectory, b as basename, e as entry, f as future, i as isSpaMode, m as mode, p as publicPath, r as routes } from './assets/server-build--37TWUlw.js';
+export { s as assets, a as assetsBuildDirectory, b as basename, e as entry, f as future, i as isSpaMode, m as mode, p as publicPath, r as routes } from './assets/server-build-DpPPNfS2.js';
 import 'react/jsx-runtime';
 import '@remix-run/react';
 import 'isbot';
@@ -27,7 +27,6 @@ import '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import 'zod';
 import 'jszip';
 import 'crypto';
-import 'pg';
 import '@octokit/rest';
 import 'rehype-sanitize';
 import 'ignore';

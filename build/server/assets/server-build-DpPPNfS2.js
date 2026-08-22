@@ -27,7 +27,6 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { z } from 'zod';
 import JSZip from 'jszip';
 import crypto$1 from 'crypto';
-import pg from 'pg';
 import { Octokit } from '@octokit/rest';
 import { defaultSchema } from 'rehype-sanitize';
 import ignore from 'ignore';
@@ -140,7 +139,7 @@ let debugLogger = null;
 const getDebugLogger = () => {
   if (!debugLogger && typeof window !== "undefined") {
     try {
-      import('./debugLogger-D9rk2-cv.js').then(({ debugLogger: loggerInstance }) => {
+      import('./debugLogger-CWBzB6Jh.js').then(({ debugLogger: loggerInstance }) => {
         debugLogger = loggerInstance;
       }).catch(() => {
       });
@@ -662,7 +661,7 @@ function App() {
       userAgent: navigator.userAgent,
       timestamp: (/* @__PURE__ */ new Date()).toISOString()
     });
-    import('./debugLogger-D9rk2-cv.js').then(({ debugLogger }) => {
+    import('./debugLogger-CWBzB6Jh.js').then(({ debugLogger }) => {
       const status = debugLogger.getStatus();
       logStore.logSystem("Debug logging ready", {
         initialized: status.initialized,
@@ -1377,12 +1376,17 @@ class OpenAIProvider extends BaseProvider {
 class LLMManager {
   static _instance;
   _providers = /* @__PURE__ */ new Map();
+  _env = {};
   constructor() {
     this._registerProviders();
   }
-  static getInstance() {
+  // ✅ env accept karta hai ab
+  static getInstance(env) {
     if (!LLMManager._instance) {
       LLMManager._instance = new LLMManager();
+    }
+    if (env) {
+      LLMManager._instance._env = env;
     }
     return LLMManager._instance;
   }
@@ -1399,13 +1403,16 @@ class LLMManager {
       this._providers.set(provider.name.toLowerCase(), provider);
     }
   }
-  // Get active provider from ENV
+  // ✅ env se active provider
   getActiveProvider() {
-    const providerName = (process.env.PROVIDER_NAME || "").toLowerCase();
-    const known = this._providers.get(providerName);
-    if (known) return known;
-    const openai = this._providers.get("openai");
-    return openai;
+    const providerName = (this._env.PROVIDER_NAME || process.env.PROVIDER_NAME || "").toLowerCase();
+    return this._providers.get(providerName) || this._providers.get("openai");
+  }
+  // ✅ MISSING — ab exist karta hai
+  getDefaultProvider() {
+    const active = this.getActiveProvider();
+    if (active) return active;
+    return Array.from(this._providers.values())[0];
   }
   getProvider(name) {
     return this._providers.get(name.toLowerCase());
@@ -1413,9 +1420,31 @@ class LLMManager {
   getAllProviders() {
     return Array.from(this._providers.values());
   }
-  // Get model instance — works with any provider
+  // ✅ MISSING — ab exist karta hai
+  async getModelListFromProvider(provider, options) {
+    const env = options.serverEnv || this._env || {};
+    const model = env.DEFAULT_MODEL || process.env.DEFAULT_MODEL || "";
+    return [{
+      name: model || provider.staticModels?.[0]?.name || "",
+      label: model || provider.staticModels?.[0]?.label || "",
+      provider: provider.name,
+      maxTokenAllowed: 8e3
+    }];
+  }
+  // ✅ MISSING — ab exist karta hai
+  async updateModelList(options) {
+    const env = options.serverEnv || this._env || {};
+    const providerName = env.PROVIDER_NAME || process.env.PROVIDER_NAME || "";
+    const model = env.DEFAULT_MODEL || process.env.DEFAULT_MODEL || "";
+    return [{
+      name: model,
+      label: model,
+      provider: providerName,
+      maxTokenAllowed: 8e3
+    }];
+  }
   getModelInstance(options) {
-    const env = options.serverEnv || {};
+    const env = options.serverEnv || this._env || {};
     const providerName = (env.PROVIDER_NAME || process.env.PROVIDER_NAME || "").toLowerCase();
     const apiKey = env.PROVIDER_API_KEY || process.env.PROVIDER_API_KEY || "";
     const model = options.model || env.DEFAULT_MODEL || process.env.DEFAULT_MODEL || "";
@@ -1436,17 +1465,8 @@ class LLMManager {
     });
     return client(model);
   }
-  // Get all models for UI display
   async getModelList(options) {
-    const env = options.serverEnv || {};
-    const providerName = env.PROVIDER_NAME || process.env.PROVIDER_NAME || "";
-    const model = env.DEFAULT_MODEL || process.env.DEFAULT_MODEL || "";
-    return [{
-      name: model,
-      label: model,
-      provider: providerName,
-      maxTokenAllowed: 8e3
-    }];
+    return this.updateModelList(options);
   }
 }
 
@@ -1455,7 +1475,7 @@ const WORK_DIR = `/home/${WORK_DIR_NAME}`;
 const MODIFICATIONS_TAG_NAME$1 = "bolt_file_modifications";
 const MODEL_REGEX = /^\[Model: (.*?)\]\n\n/;
 const PROVIDER_REGEX = /\[Provider: (.*?)\]\n\n/;
-const DEFAULT_MODEL = "claude-3-5-sonnet-latest";
+const DEFAULT_MODEL = process.env.DEFAULT_MODEL || "";
 const TOOL_EXECUTION_APPROVAL = {
   APPROVE: "Yes, approved.",
   REJECT: "No, rejected."
@@ -2309,7 +2329,7 @@ const route5 = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({
   action: action$m
 }, Symbol.toStringTag, { value: 'Module' }));
 
-function parseCookies$1(cookieHeader) {
+function parseCookies(cookieHeader) {
   const cookies = {};
   if (!cookieHeader) {
     return cookies;
@@ -2326,11 +2346,11 @@ function parseCookies$1(cookieHeader) {
   return cookies;
 }
 function getApiKeysFromCookie(cookieHeader) {
-  const cookies = parseCookies$1(cookieHeader);
+  const cookies = parseCookies(cookieHeader);
   return cookies.apiKeys ? JSON.parse(cookies.apiKeys) : {};
 }
 function getProviderSettingsFromCookie(cookieHeader) {
-  const cookies = parseCookies$1(cookieHeader);
+  const cookies = parseCookies(cookieHeader);
   return cookies.providers ? JSON.parse(cookies.providers) : {};
 }
 
@@ -4091,68 +4111,9 @@ const route16 = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({
   loader: loader$j
 }, Symbol.toStringTag, { value: 'Module' }));
 
-const { Pool } = pg;
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL
-});
-async function query(text, params) {
-  const client = await pool.connect();
-  try {
-    const result = await client.query(text, params);
-    return result;
-  } finally {
-    client.release();
-  }
-}
-async function saveProject(id, title, messages, files) {
-  const result = await query(
-    `INSERT INTO projects (chat_id, title, messages, files, updated_at)
-     VALUES ($1, $2, $3, $4, NOW())
-     ON CONFLICT (chat_id) DO UPDATE
-     SET title = $2, messages = $3, files = $4, updated_at = NOW()
-     RETURNING *`,
-    [id, title, JSON.stringify(messages), JSON.stringify(files)]
-  );
-  return result.rows[0];
-}
-async function getProject(id) {
-  const result = await query(
-    "SELECT * FROM projects WHERE chat_id = $1 OR id::text = $1",
-    [id]
-  );
-  return result.rows[0];
-}
-async function getAllProjects() {
-  const result = await query(
-    "SELECT id, title, created_at, updated_at FROM projects ORDER BY updated_at DESC"
-  );
-  return result.rows;
-}
-async function createUser(email, passwordHash, name) {
-  const result = await query(
-    `INSERT INTO users (email, password_hash, name)
-     VALUES ($1, $2, $3)
-     RETURNING *`,
-    [email, passwordHash, name]
-  );
-  return result.rows[0];
-}
-async function getUserByEmail(email) {
-  const result = await query(
-    `SELECT * FROM users WHERE email = $1`,
-    [email]
-  );
-  return result.rows[0] || null;
-}
-async function emailExists(email) {
-  const result = await query(
-    `SELECT 1 FROM users WHERE email = $1`,
-    [email]
-  );
-  return result.rows.length > 0;
-}
-
-async function loader$i({ request }) {
+async function loader$i({ request, context }) {
+  const { query } = await Promise.resolve().then(() => db_server);
+  const env = context.cloudflare?.env;
   const url = new URL(request.url);
   const runId = url.searchParams.get("runId");
   if (!runId) {
@@ -4175,7 +4136,8 @@ async function loader$i({ request }) {
         try {
           const runResult = await query(
             "SELECT status, project_type FROM agent_runs WHERE id = $1",
-            [runId]
+            [runId],
+            env
           );
           const run = runResult.rows[0];
           if (!run) {
@@ -4188,7 +4150,8 @@ async function loader$i({ request }) {
              FROM agent_tasks
              WHERE run_id = $1
              ORDER BY completed_at ASC`,
-            [runId]
+            [runId],
+            env
           );
           const tasks = tasksResult.rows;
           if (tasks.length > lastTaskCount) {
@@ -5261,22 +5224,22 @@ const PROVIDER_COMPLETION_LIMITS = {
   // GitHub Models use OpenAI-compatible limits
   Anthropic: 64e3,
   // Conservative limit for Claude 4 models (Opus: 32k, Sonnet: 64k)
-  Google: 8192,
+  Google: 3e3,
   // Gemini 1.5 Pro/Flash standard limit
   Cohere: 4e3,
-  DeepSeek: 8192,
+  DeepSeek: 3e3,
   Groq: 8192,
   HuggingFace: 4096,
-  Mistral: 8192,
-  Ollama: 8192,
-  OpenRouter: 8192,
-  Perplexity: 8192,
-  Together: 8192,
-  xAI: 8192,
-  LMStudio: 8192,
-  OpenAILike: 8192,
-  AmazonBedrock: 8192,
-  Hyperbolic: 8192
+  Mistral: 3e3,
+  Ollama: 3e3,
+  OpenRouter: 3e3,
+  Perplexity: 3e3,
+  Together: 3e3,
+  xAI: 3e3,
+  LMStudio: 3e3,
+  OpenAILike: 3e3,
+  AmazonBedrock: 3e3,
+  Hyperbolic: 3e3
 };
 function isReasoningModel(modelName) {
   const result = /^(o1|o3|gpt-5)/i.test(modelName);
@@ -6614,6 +6577,23 @@ function getFineTunedPrompt(cwd = "/home/project", supabase, designScheme) {
   return `
 You are DigitalSofts Agent, an expert AI assistant and exceptional senior software developer with vast knowledge across multiple programming languages, frameworks, and best practices, created by DigitalSofts.
 
+<scope_boundary>
+  CRITICAL — READ FIRST: You handle FRONTEND UI code only. A separate, more reliable
+  system already exists in this product for backend-adjacent work — Stripe/Firebase/
+  Supabase integration, .env secrets, and sample/seed data — and it runs automatically
+  after you finish. Do NOT duplicate that work yourself:
+  - NEVER create a real .env file with actual secret values. (A harmless .env.example
+    template with empty placeholder values is fine if truly needed.)
+  - NEVER write third-party backend-service integration code yourself (Stripe, Firebase,
+    Supabase, payment processing, server-side auth) — assume it will be wired in
+    separately. Build your UI against the assumption that such integrations exist.
+  - If the user's request needs a real backend/server/database beyond a BaaS integration,
+    build ONLY the frontend and assume it talks to conventional REST paths (e.g.
+    fetch('/api/...')) — do not stub out or fake a backend yourself.
+  - A frontend file that merely CALLS a backend (e.g. src/api/client.ts, a fetch wrapper)
+    is fine and expected — that's ordinary frontend code, not backend.
+</scope_boundary>
+
 <system_constraints>
   You are operating in an environment called WebContainer, an in-browser Node.js runtime that emulates a Linux system to some degree. All code runs entirely within the browser. The shell is available for running commands.
 
@@ -6693,6 +6673,31 @@ NEVER use the word "artifact" when talking to the user. Instead say "I'll help y
 
 IMPORTANT: Think first and reply with the artifact that contains all necessary steps.
 IMPORTANT: DigitalSofts Agent only supports JavaScript and TypeScript. For any other language, politely decline and suggest a JavaScript/TypeScript alternative.
+
+ABSOLUTE RULE — CODE OUTPUT FORMAT:
+You MUST ALWAYS wrap ALL code in <boltArtifact> tags. NEVER write code, file contents, or shell commands outside of a boltArtifact block.
+FORBIDDEN: Writing code in markdown code blocks (\`\`\`) directly in your response.
+FORBIDDEN: Writing file contents or shell commands outside of boltAction tags.
+REQUIRED FORMAT for every response that involves code:
+
+<boltArtifact id="unique-id" title="Project Title">
+<boltAction type="file" filePath="package.json">
+{
+  "scripts": { "dev": "vite", "build": "vite build", "preview": "vite preview" },
+  "devDependencies": { "vite": "^5.0.0" }
+}
+</boltAction>
+<boltAction type="file" filePath="index.html">
+<!DOCTYPE html>
+<html>...</html>
+</boltAction>
+<boltAction type="shell">
+npm install && npm run dev
+</boltAction>
+</boltArtifact>
+
+If you are ONLY explaining without generating code, you may respond in plain text.
+But if ANY code, file, or command is involved — wrap EVERYTHING in boltArtifact tags.
 `;
 }
 const allowedHtmlElements = ["a", "b", "blockquote", "br", "code", "dd", "del", "details", "div", "dl", "dt", "em", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "i", "ins", "kbd", "li", "ol", "p", "pre", "q", "s", "samp", "source", "span", "strike", "strong", "sub", "summary", "sup", "table", "tbody", "td", "th", "thead", "tr", "ul", "var", "video"];
@@ -7059,10 +7064,10 @@ async function streamText(props) {
   const currentModel = envAny?.DEFAULT_MODEL || DEFAULT_MODEL;
   const currentApiKey = envAny?.PROVIDER_API_KEY || "";
   logger$b.info(`Using Provider: ${currentProvider}, Model: ${currentModel}, Key: ${currentApiKey ? "SET" : "MISSING"}`);
-  const finalApiKeys = {
-    ...apiKeys,
-    [currentProvider]: currentApiKey
-  };
+  const finalApiKeys = { ...apiKeys };
+  if (currentProvider) {
+    finalApiKeys[currentProvider] = currentApiKey;
+  }
   let processedMessages = messages.map((message) => {
     const newMessage = { ...message };
     if (message.role === "user") {
@@ -7081,8 +7086,10 @@ async function streamText(props) {
   const provider = PROVIDER_LIST.find((p) => p.name.toLowerCase() === currentProvider.toLowerCase()) || DEFAULT_PROVIDER;
   const modelDetails = {
     name: currentModel};
-  const safeMaxTokens = 8192;
+  const envMaxCompletionTokens = envAny?.MAX_COMPLETION_TOKENS ? parseInt(envAny.MAX_COMPLETION_TOKENS, 10) : NaN;
+  const safeMaxTokens = !isNaN(envMaxCompletionTokens) && envMaxCompletionTokens > 0 ? envMaxCompletionTokens : 4e3;
   logger$b.info(`Sending llm call to ${provider.name} with model ${modelDetails.name}`);
+  console.log("chatMode:", chatMode);
   let systemPrompt = PromptLibrary.getPropmtFromLibrary(promptId || "default", {
     cwd: WORK_DIR,
     allowedHtmlElements: allowedHTMLElements,
@@ -7142,6 +7149,7 @@ ${lockedList}
       ([key]) => !["temperature", "topP", "presencePenalty", "frequencyPenalty", "logprobs", "topLogprobs", "logitBias"].includes(key)
     )
   ) : options || {};
+  console.log("chatMode:", chatMode);
   const streamParams = {
     model: provider.getModelInstance({
       model: modelDetails.name,
@@ -7149,7 +7157,7 @@ ${lockedList}
       apiKeys: finalApiKeys,
       providerSettings
     }),
-    system: chatMode === "build" ? systemPrompt : discussPrompt(),
+    system: chatMode === "discuss" ? discussPrompt() : systemPrompt,
     ...tokenParams,
     messages: convertToCoreMessages(processedMessages),
     ...filteredOptions,
@@ -7330,30 +7338,81 @@ const route27 = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({
   loader: loader$b
 }, Symbol.toStringTag, { value: 'Module' }));
 
-async function loader$a({ request }) {
-  const url = new URL(request.url);
-  const id = url.searchParams.get("id");
-  if (id) {
-    const project = await getProject(id);
-    return json({ project });
-  }
-  const projects = await getAllProjects();
-  return json({ projects });
+function getGuestIdFromCookie(cookieHeader) {
+  if (!cookieHeader) return null;
+  const match = cookieHeader.match(/__bolt_guest_id=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
 }
-async function action$8({ request }) {
-  if (request.method === "DELETE") {
-    const url = new URL(request.url);
-    const id2 = url.searchParams.get("id");
-    if (id2) {
-      await query("DELETE FROM projects WHERE chat_id = $1 OR id::text = $1", [id2]);
-      return json({ success: true });
-    }
-    return json({ error: "No id provided" }, { status: 400 });
+async function getEffectiveUserId(request, env) {
+  const { getUser } = await Promise.resolve().then(() => session_server);
+  const user = await getUser(request, env);
+  if (user?.userId) {
+    return { userId: String(user.userId) };
   }
-  const body = await request.json();
-  const { id, title, messages, files } = body;
-  const project = await saveProject(id, title, messages, files);
-  return json({ project });
+  const cookieHeader = request.headers.get("Cookie");
+  let guestId = getGuestIdFromCookie(cookieHeader);
+  let newGuestId = void 0;
+  if (!guestId) {
+    guestId = `guest_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    newGuestId = guestId;
+  }
+  return { userId: guestId, newGuestId };
+}
+function withCookieHeader(responseInit, newGuestId) {
+  if (!newGuestId) return responseInit || {};
+  const cookieValue = `__bolt_guest_id=${encodeURIComponent(newGuestId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`;
+  const existingHeaders = new Headers(responseInit?.headers);
+  existingHeaders.append("Set-Cookie", cookieValue);
+  return { ...responseInit, headers: existingHeaders };
+}
+async function loader$a({ request, context }) {
+  const env = context.cloudflare?.env;
+  try {
+    const { userId, newGuestId } = await getEffectiveUserId(request, env);
+    const url = new URL(request.url);
+    const id = url.searchParams.get("id");
+    const { getProjectForUser, getAllProjectsForUser } = await Promise.resolve().then(() => db_server);
+    if (id) {
+      console.log("[API /projects GET] single — user:", userId, "| id:", id);
+      const project = await getProjectForUser(id, userId, env);
+      return json({ project: project || null }, withCookieHeader({}, newGuestId));
+    }
+    console.log("[API /projects GET] all — user:", userId);
+    const projects = await getAllProjectsForUser(userId, env);
+    console.log("[API /projects GET] returning", projects.length, "projects");
+    return json({ projects: projects || [] }, withCookieHeader({}, newGuestId));
+  } catch (err) {
+    console.error("[API /projects GET] Error:", err?.message ?? err);
+    return json({ projects: [], error: err?.message }, { status: 500 });
+  }
+}
+async function action$8({ request, context }) {
+  const env = context.cloudflare?.env;
+  try {
+    const { userId, newGuestId } = await getEffectiveUserId(request, env);
+    const { saveProjectForUser, deleteProjectForUser } = await Promise.resolve().then(() => db_server);
+    if (request.method === "DELETE") {
+      const url = new URL(request.url);
+      const id2 = url.searchParams.get("id");
+      if (id2) {
+        await deleteProjectForUser(id2, userId, env);
+        return json({ success: true }, withCookieHeader({}, newGuestId));
+      }
+      return json({ error: "No id provided" }, withCookieHeader({ status: 400 }, newGuestId));
+    }
+    const body = await request.json();
+    const { id, title, messages, files } = body;
+    if (!id) {
+      return json({ error: "No id provided" }, withCookieHeader({ status: 400 }, newGuestId));
+    }
+    console.log("[API /projects] POST — user:", userId, "| chat_id:", id, "| title:", title);
+    const project = await saveProjectForUser(id, title || "Untitled Project", messages, files, userId, env);
+    console.log("[API /projects] Saved project row id:", project?.id);
+    return json({ project }, withCookieHeader({}, newGuestId));
+  } catch (err) {
+    console.error("[API /projects] Action error:", err?.message ?? err);
+    return json({ error: err?.message ?? "Internal server error" }, { status: 500 });
+  }
 }
 
 const route28 = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({
@@ -7394,73 +7453,26 @@ function validateTokenLimits(modelDetails, requestedTokens) {
   return { valid: true };
 }
 async function llmCallAction({ context, request }) {
-  const { system, message, model, provider, streamOutput } = await request.json();
-  const { name: providerName } = provider;
+  const { system, message } = await request.json();
+  const env = context.cloudflare?.env || {};
+  const model = env.DEFAULT_MODEL;
+  const providerName = env.PROVIDER_NAME;
+  const provider = { name: providerName };
   if (!model || typeof model !== "string") {
-    throw new Response("Invalid or missing model", {
+    throw new Response("Server misconfiguration: DEFAULT_MODEL is not set in .env", {
       status: 400,
       statusText: "Bad Request"
     });
   }
   if (!providerName || typeof providerName !== "string") {
-    throw new Response("Invalid or missing provider", {
+    throw new Response("Server misconfiguration: PROVIDER_NAME is not set in .env", {
       status: 400,
       statusText: "Bad Request"
     });
   }
-  const cookieHeader = request.headers.get("Cookie");
-  const apiKeys = getApiKeysFromCookie(cookieHeader);
-  const providerSettings = getProviderSettingsFromCookie(cookieHeader);
-  const env = context.cloudflare?.env || {};
-  const envProviderName = env.PROVIDER_NAME || "OpenRouter";
-  if (env.PROVIDER_API_KEY) {
-    apiKeys[envProviderName] = env.PROVIDER_API_KEY;
-  }
-  if (streamOutput) {
-    try {
-      const result = await streamText({
-        options: {
-          system
-        },
-        messages: [
-          {
-            role: "user",
-            content: `${message}`
-          }
-        ],
-        env: context.cloudflare?.env,
-        apiKeys,
-        providerSettings
-      });
-      return new Response(result.textStream, {
-        status: 200,
-        headers: {
-          "Content-Type": "text/plain; charset=utf-8"
-        }
-      });
-    } catch (error) {
-      console.log(error);
-      if (error instanceof Error && error.message?.includes("API key")) {
-        throw new Response("Invalid or missing API key", {
-          status: 401,
-          statusText: "Unauthorized"
-        });
-      }
-      if (error instanceof Error && (error.message?.includes("max_tokens") || error.message?.includes("token") || error.message?.includes("exceeds") || error.message?.includes("maximum"))) {
-        throw new Response(
-          `Token limit error: ${error.message}. Try reducing your request size or using a model with higher token limits.`,
-          {
-            status: 400,
-            statusText: "Token Limit Exceeded"
-          }
-        );
-      }
-      throw new Response(null, {
-        status: 500,
-        statusText: "Internal Server Error"
-      });
-    }
-  } else {
+  const apiKeys = env.PROVIDER_API_KEY ? { [providerName]: env.PROVIDER_API_KEY } : {};
+  const providerSettings = {};
+  {
     try {
       const envModel = env.DEFAULT_MODEL || model;
       const modelDetails = {
@@ -7478,8 +7490,8 @@ async function llmCallAction({ context, request }) {
           statusText: "Token Limit Exceeded"
         });
       }
-      const envProviderName2 = env.PROVIDER_NAME || provider.name;
-      const providerInfo = PROVIDER_LIST.find((p) => p.name === envProviderName2);
+      const envProviderName = env.PROVIDER_NAME || provider.name;
+      const providerInfo = PROVIDER_LIST.find((p) => p.name === envProviderName);
       if (!providerInfo) {
         throw new Error("Provider not found");
       }
@@ -7584,67 +7596,12 @@ const route29 = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({
   action: action$7
 }, Symbol.toStringTag, { value: 'Module' }));
 
-const JWT_SECRET = process.env.JWT_SECRET || "bolt-diy-secret-key-change-in-production";
-async function hashPassword(password) {
-  return bcrypt.hash(password, 12);
-}
-async function verifyPassword(password, hash) {
-  return bcrypt.compare(password, hash);
-}
-function signToken(payload) {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
-}
-function verifyToken(token) {
-  try {
-    return jwt.verify(token, JWT_SECRET);
-  } catch {
-    return null;
-  }
-}
-
-const SESSION_SECRET = process.env.SESSION_SECRET || "bolt-session-secret-change-in-production";
-const sessionStorage = createCookieSessionStorage({
-  cookie: {
-    name: "__bolt_session",
-    httpOnly: true,
-    path: "/",
-    sameSite: "lax",
-    secrets: [SESSION_SECRET],
-    secure: true,
-    maxAge: 60 * 60 * 24 * 7
-  }
-});
-async function getSession(request) {
-  return sessionStorage.getSession(request.headers.get("Cookie"));
-}
-async function getUser(request) {
-  const session = await getSession(request);
-  const token = session.get("token");
-  if (!token) return null;
-  return verifyToken(token);
-}
-async function createUserSession(token, redirectTo) {
-  const session = await sessionStorage.getSession();
-  session.set("token", token);
-  return redirect(redirectTo, {
-    headers: {
-      "Set-Cookie": await sessionStorage.commitSession(session)
-    }
-  });
-}
-async function destroyUserSession(request, redirectTo = "/") {
-  const session = await getSession(request);
-  return redirect(redirectTo, {
-    headers: {
-      "Set-Cookie": await sessionStorage.destroySession(session)
-    }
-  });
-}
-
 async function action$6({ request }) {
+  const { destroyUserSession } = await Promise.resolve().then(() => session_server);
   return destroyUserSession(request);
 }
 async function loader$9({ request }) {
+  const { destroyUserSession } = await Promise.resolve().then(() => session_server);
   return destroyUserSession(request);
 }
 
@@ -7741,12 +7698,249 @@ function SignupForm({ error, isLoading }) {
   ] }) });
 }
 
-async function loader$8({ request }) {
-  const user = await getUser(request);
+let _pool = null;
+let _sql = null;
+function isCloudflare(env) {
+  if (env?.CF_PAGES) return true;
+  if (typeof navigator !== "undefined" && navigator.userAgent === "Cloudflare-Workers") return true;
+  return false;
+}
+async function getDb(env) {
+  const url = env?.DATABASE_URL || process.env?.DATABASE_URL || "";
+  if (!url) throw new Error("DATABASE_URL not set");
+  if (isCloudflare(env)) {
+    if (!_sql) {
+      const { neon } = await import('@neondatabase/serverless');
+      _sql = neon(url);
+    }
+    return { type: "neon", client: _sql };
+  } else {
+    if (!_pool) {
+      const pg = await import('pg');
+      _pool = new pg.default.Pool({ connectionString: url });
+    }
+    return { type: "pg", client: _pool };
+  }
+}
+async function query(text, params, env) {
+  const db = await getDb(env);
+  if (db.type === "neon") {
+    const client = db.client;
+    let result;
+    if (typeof client.query === "function") {
+      result = await client.query(text, params || []);
+    } else if (typeof client === "function") {
+      result = await client.query(text, params || []);
+    } else {
+      throw new Error("Invalid Neon DB client");
+    }
+    const rows = Array.isArray(result) ? result : result?.rows || [];
+    return { rows };
+  } else {
+    const client = await db.client.connect();
+    try {
+      const result = await client.query(text, params || []);
+      return result;
+    } finally {
+      client.release();
+    }
+  }
+}
+async function createUser(email, passwordHash, name, env) {
+  const result = await query(
+    `INSERT INTO users (email, password_hash, name)
+     VALUES ($1, $2, $3)
+     RETURNING *`,
+    [email, passwordHash, name],
+    env
+  );
+  return result.rows[0];
+}
+async function getUserByEmail(email, env) {
+  const result = await query(
+    `SELECT * FROM users WHERE email = $1`,
+    [email],
+    env
+  );
+  return result.rows[0] || null;
+}
+async function emailExists(email, env) {
+  const result = await query(
+    `SELECT 1 FROM users WHERE email = $1`,
+    [email],
+    env
+  );
+  return result.rows.length > 0;
+}
+async function saveProjectForUser(id, title, messages, files, userId, env) {
+  const messagesJson = typeof messages === "string" ? messages : JSON.stringify(messages || []);
+  const filesJson = typeof files === "string" ? files : JSON.stringify(files || {});
+  console.log("[DB saveProject] chat_id:", id, "| user_id:", userId, "| title:", title);
+  try {
+    const result = await query(
+      `INSERT INTO projects (chat_id, title, messages, files, user_id, updated_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())
+       ON CONFLICT (chat_id) DO UPDATE
+       SET title = $2, messages = $3, files = $4, user_id = $5, updated_at = NOW()
+       RETURNING *`,
+      [id, title, messagesJson, filesJson, userId],
+      env
+    );
+    console.log("[DB saveProject] Saved row id:", result.rows[0]?.id);
+    return result.rows[0];
+  } catch (e) {
+    console.error("[DB saveProject] Primary upsert failed:", e?.message);
+    try {
+      const check = await query(`SELECT id FROM projects WHERE chat_id = $1`, [id], env);
+      if (check.rows.length > 0) {
+        const updateResult = await query(
+          `UPDATE projects SET title = $1, messages = $2, files = $3, user_id = $4, updated_at = NOW()
+           WHERE chat_id = $5 RETURNING *`,
+          [title, messagesJson, filesJson, userId, id],
+          env
+        );
+        console.log("[DB saveProject] Fallback UPDATE ok, id:", updateResult.rows[0]?.id);
+        return updateResult.rows[0];
+      } else {
+        const insertResult = await query(
+          `INSERT INTO projects (chat_id, title, messages, files, user_id, updated_at)
+           VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *`,
+          [id, title, messagesJson, filesJson, userId],
+          env
+        );
+        console.log("[DB saveProject] Fallback INSERT ok, id:", insertResult.rows[0]?.id);
+        return insertResult.rows[0];
+      }
+    } catch (e2) {
+      console.error("[DB saveProject] All fallbacks failed:", e2?.message);
+      throw e2;
+    }
+  }
+}
+async function getProjectForUser(id, userId, env) {
+  try {
+    const result = await query(
+      `SELECT * FROM projects WHERE (chat_id = $1 OR id::text = $1) AND user_id = $2`,
+      [id, userId],
+      env
+    );
+    console.log("[DB getProject] id:", id, "| user_id:", userId, "| found:", result.rows.length);
+    return result.rows[0];
+  } catch (e) {
+    console.error("[DB getProject] Error:", e?.message);
+    return null;
+  }
+}
+async function getAllProjectsForUser(userId, env) {
+  try {
+    const result = await query(
+      `SELECT id, chat_id, title, created_at, updated_at
+       FROM projects WHERE user_id = $1
+       ORDER BY updated_at DESC`,
+      [userId],
+      env
+    );
+    console.log("[DB getAllProjects] user_id:", userId, "| count:", result.rows.length);
+    return result.rows;
+  } catch (e) {
+    console.error("[DB getAllProjects] Error:", e?.message);
+    return [];
+  }
+}
+async function deleteProjectForUser(chatId, userId, env) {
+  const result = await query(
+    `DELETE FROM projects WHERE chat_id = $1 AND user_id = $2 RETURNING *`,
+    [chatId, userId],
+    env
+  );
+  return result.rows[0];
+}
+
+const db_server = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({
+  __proto__: null,
+  createUser,
+  deleteProjectForUser,
+  emailExists,
+  getAllProjectsForUser,
+  getProjectForUser,
+  getUserByEmail,
+  query,
+  saveProjectForUser
+}, Symbol.toStringTag, { value: 'Module' }));
+
+const JWT_SECRET = process.env.JWT_SECRET || "bolt-diy-secret-key-change-in-production";
+async function hashPassword(password) {
+  return bcrypt.hash(password, 12);
+}
+async function verifyPassword(password, hash) {
+  return bcrypt.compare(password, hash);
+}
+function signToken(payload) {
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
+}
+function verifyToken(token) {
+  try {
+    return jwt.verify(token, JWT_SECRET);
+  } catch {
+    return null;
+  }
+}
+
+const SESSION_SECRET = process.env.SESSION_SECRET || "bolt-session-secret-change-in-production";
+const sessionStorage = createCookieSessionStorage({
+  cookie: {
+    name: "__bolt_session",
+    httpOnly: true,
+    path: "/",
+    sameSite: "lax",
+    secrets: [SESSION_SECRET],
+    secure: true,
+    maxAge: 60 * 60 * 24 * 7
+  }
+});
+async function getSession(request) {
+  return sessionStorage.getSession(request.headers.get("Cookie"));
+}
+async function getUser(request, env) {
+  const session = await getSession(request);
+  const token = session.get("token");
+  if (!token) return null;
+  return verifyToken(token);
+}
+async function createUserSession(token, redirectTo) {
+  const session = await sessionStorage.getSession();
+  session.set("token", token);
+  return redirect(redirectTo, {
+    headers: {
+      "Set-Cookie": await sessionStorage.commitSession(session)
+    }
+  });
+}
+async function destroyUserSession(request, redirectTo = "/") {
+  const session = await getSession(request);
+  return redirect(redirectTo, {
+    headers: {
+      "Set-Cookie": await sessionStorage.destroySession(session)
+    }
+  });
+}
+
+const session_server = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({
+  __proto__: null,
+  createUserSession,
+  destroyUserSession,
+  getSession,
+  getUser,
+  sessionStorage
+}, Symbol.toStringTag, { value: 'Module' }));
+
+async function loader$8({ request, context }) {
+  const user = await getUser(request, context.cloudflare?.env);
   if (user) throw redirect("/");
   return null;
 }
-async function action$5({ request }) {
+async function action$5({ request, context }) {
+  const env = context.cloudflare?.env;
   const formData = await request.formData();
   const name = formData.get("name");
   const email = formData.get("email");
@@ -7757,12 +7951,12 @@ async function action$5({ request }) {
   if (password.length < 6) {
     return json({ error: "Password must be at least 6 characters" }, { status: 400 });
   }
-  const exists = await emailExists(email);
+  const exists = await emailExists(email, env);
   if (exists) {
     return json({ error: "Email already registered. Please login." }, { status: 400 });
   }
   const passwordHash = await hashPassword(password);
-  const user = await createUser(email, passwordHash, name);
+  const user = await createUser(email, passwordHash, name, env);
   const token = signToken({ userId: user.id, email: user.email, name: user.name });
   return createUserSession(token, "/");
 }
@@ -7952,6 +8146,7 @@ async function publishToAll(payload) {
 
 async function loader$6({ request }) {
   try {
+    const { query } = await Promise.resolve().then(() => db_server);
     const result = await query(
       "SELECT id, platform, account_name, is_active, created_at FROM social_accounts ORDER BY created_at DESC"
     );
@@ -7961,6 +8156,7 @@ async function loader$6({ request }) {
   }
 }
 async function action$4({ request }) {
+  const { query } = await Promise.resolve().then(() => db_server);
   const body = await request.json();
   const { action: action2 } = body;
   if (action2 === "save_account") {
@@ -8194,19 +8390,20 @@ function LoginForm({ error, isLoading }) {
   ] }) });
 }
 
-async function loader$5({ request }) {
-  const user = await getUser(request);
+async function loader$5({ request, context }) {
+  const user = await getUser(request, context.cloudflare?.env);
   if (user) throw redirect("/");
   return null;
 }
-async function action$2({ request }) {
+async function action$2({ request, context }) {
+  const env = context.cloudflare?.env;
   const formData = await request.formData();
   const email = formData.get("email");
   const password = formData.get("password");
   if (!email || !password) {
     return json({ error: "Email and password are required" }, { status: 400 });
   }
-  const user = await getUserByEmail(email);
+  const user = await getUserByEmail(email, env);
   if (!user) {
     return json({ error: "Invalid email or password" }, { status: 400 });
   }
@@ -8481,26 +8678,26 @@ User request: "${userRequest}"
 Return execution plan JSON only.
 `;
 
-async function createAgentRun(chatId, projectType, userRequest) {
+async function createAgentRun(chatId, projectType, userRequest, env) {
   const result = await query(
     `INSERT INTO agent_runs (chat_id, status, project_type, requirements)
      VALUES ($1, $2, $3, $4)
      RETURNING id`,
-    [chatId, "pending", projectType, JSON.stringify({ userRequest })]
+    [chatId, "pending", projectType, JSON.stringify({ userRequest })],
+    env
   );
   return result.rows[0].id;
 }
-async function updateRunStatus(runId, status, data) {
+async function updateRunStatus(runId, status, data, env) {
   {
     await query(
-      `UPDATE agent_runs 
-       SET status = $1
-       WHERE id = $2`,
-      [status, runId]
+      `UPDATE agent_runs SET status = $1 WHERE id = $2`,
+      [status, runId],
+      env
     );
   }
 }
-async function saveAgentTask(runId, agentName, status, input, output, error) {
+async function saveAgentTask(runId, agentName, status, input, output, error, env) {
   await query(
     `INSERT INTO agent_tasks 
      (run_id, agent_name, status, input, output, error, started_at, completed_at)
@@ -8512,7 +8709,8 @@ async function saveAgentTask(runId, agentName, status, input, output, error) {
       JSON.stringify(input),
       output ? JSON.stringify(output) : null,
       error || null
-    ]
+    ],
+    env
   );
 }
 
@@ -8535,13 +8733,12 @@ const ANALYST_USER_PROMPT = (userRequest) => `User request: "${userRequest}"
 Return requirements JSON only.`;
 
 class AnalystAgent extends AgentBase {
-  constructor() {
+  constructor(env) {
     super({
       name: "analyst",
       maxRetries: 3,
       timeoutMs: 6e4
-      // 60 seconds
-    });
+    }, env);
   }
   async execute(input) {
     const userMessage = ANALYST_USER_PROMPT(input.userRequest);
@@ -8581,12 +8778,12 @@ const ARCHITECT_USER_PROMPT = (requirements) => `Requirements: ${JSON.stringify(
 Return architecture JSON only.`;
 
 class ArchitectAgent extends AgentBase {
-  constructor() {
+  constructor(env) {
     super({
       name: "architect",
       maxRetries: 3,
       timeoutMs: 6e4
-    });
+    }, env);
   }
   async execute(input) {
     if (!input.context?.requirements) {
@@ -8640,13 +8837,12 @@ Design: ${JSON.stringify(designDecisions)}
 Write ALL files. Return JSON only.`;
 
 class CoderAgent extends AgentBase {
-  constructor() {
+  constructor(env) {
     super({
       name: "coder",
       maxRetries: 2,
-      timeoutMs: 18e4
-      // 3 minutes — coding takes longest
-    });
+      timeoutMs: 12e4
+    }, env);
   }
   async execute(input) {
     const { requirements, architecture, designDecisions } = input.context || {};
@@ -8699,12 +8895,12 @@ const REVIEWER_USER_PROMPT = (requirements, generatedCode) => `Files generated: 
 Return review JSON only.`;
 
 class ReviewerAgent extends AgentBase {
-  constructor() {
+  constructor(env) {
     super({
       name: "reviewer",
       maxRetries: 2,
       timeoutMs: 6e4
-    });
+    }, env);
   }
   async execute(input) {
     const { requirements, generatedCode } = input.context || {};
@@ -8751,12 +8947,12 @@ const UIUX_USER_PROMPT = (requirements) => `Project: ${requirements.projectType}
 Return design JSON only.`;
 
 class UIUXAgent extends AgentBase {
-  constructor() {
+  constructor(env) {
     super({
       name: "uiux",
       maxRetries: 3,
-      timeoutMs: 45e3
-    });
+      timeoutMs: 6e4
+    }, env);
   }
   async execute(input) {
     if (!input.context?.requirements) {
@@ -8821,12 +9017,12 @@ RESPONSE FORMAT — Return ONLY this JSON:
 }
 `;
 class DataAgent extends AgentBase {
-  constructor() {
+  constructor(env) {
     super({
       name: "data",
-      maxRetries: 2,
-      timeoutMs: 45e3
-    });
+      maxRetries: 3,
+      timeoutMs: 6e4
+    }, env);
   }
   async execute(input) {
     const requirements = input.context?.requirements;
@@ -8904,12 +9100,12 @@ STRIPE_SECRET_KEY=
 }
 `;
 class IntegrationAgent extends AgentBase {
-  constructor() {
+  constructor(env) {
     super({
       name: "integration",
-      maxRetries: 2,
-      timeoutMs: 45e3
-    });
+      maxRetries: 3,
+      timeoutMs: 6e4
+    }, env);
   }
   async execute(input) {
     const requirements = input.context?.requirements;
@@ -8947,29 +9143,29 @@ Generate complete integration code for all required services.
   }
 }
 
-function getAgent(name) {
+function getAgent(name, env) {
   switch (name) {
     case "analyst":
-      return new AnalystAgent();
+      return new AnalystAgent(env);
     case "architect":
-      return new ArchitectAgent();
+      return new ArchitectAgent(env);
     case "coder":
-      return new CoderAgent();
+      return new CoderAgent(env);
     case "reviewer":
-      return new ReviewerAgent();
+      return new ReviewerAgent(env);
     case "uiux":
-      return new UIUXAgent();
+      return new UIUXAgent(env);
     case "data":
-      return new DataAgent();
+      return new DataAgent(env);
     case "integration":
-      return new IntegrationAgent();
+      return new IntegrationAgent(env);
     default:
       throw new Error(`Unknown agent: ${name}`);
   }
 }
 async function runAgentPlan(plan, onProgress) {
   let context = {};
-  await updateRunStatus(plan.runId, "running");
+  await updateRunStatus(plan.runId, "running", void 0, plan.env);
   for (const phase of plan.phases) {
     console.log(`
 🚀 Phase: ${phase.phaseName} [${phase.executionType}]`);
@@ -8995,11 +9191,11 @@ async function runAgentPlan(plan, onProgress) {
       }
     }
   }
-  await updateRunStatus(plan.runId, "done");
+  await updateRunStatus(plan.runId, "done", void 0, plan.env);
   return context;
 }
 async function runSingleAgent(agentName, plan, context, onProgress) {
-  const agent = getAgent(agentName);
+  const agent = getAgent(agentName, plan.env);
   onProgress?.({
     runId: plan.runId,
     agentName,
@@ -9014,7 +9210,7 @@ async function runSingleAgent(agentName, plan, context, onProgress) {
   };
   const output = await agent.run(input);
   if (output.success) {
-    await saveAgentTask(plan.runId, agentName, "done", input, output.data);
+    await saveAgentTask(plan.runId, agentName, "done", input, output.data, void 0, plan.env);
     const updatedContext = updateContext(context, agentName, output.data);
     onProgress?.({
       runId: plan.runId,
@@ -9025,7 +9221,7 @@ async function runSingleAgent(agentName, plan, context, onProgress) {
     });
     return updatedContext;
   } else {
-    await saveAgentTask(plan.runId, agentName, "failed", input, null, output.error);
+    await saveAgentTask(plan.runId, agentName, "failed", input, null, output.error, plan.env);
     onProgress?.({
       runId: plan.runId,
       agentName,
@@ -9100,7 +9296,7 @@ class Orchestrator extends AgentBase {
       console.log(`
 📋 Plan ready — Project: ${plan.projectType}`);
       console.log(`Reasoning: ${plan.reasoning}`);
-      const runId = await createAgentRun(chatId, plan.projectType, userRequest);
+      const runId = await createAgentRun(chatId, plan.projectType, userRequest, this.env);
       console.log(`
 💾 Run created — ID: ${runId}`);
       const agentPlan = {
@@ -9108,7 +9304,8 @@ class Orchestrator extends AgentBase {
         chatId,
         userRequest,
         projectType: plan.projectType,
-        phases: plan.phases
+        phases: plan.phases,
+        env: this.env
       };
       const context = await runAgentPlan(agentPlan, onProgress);
       const allFiles = {};
@@ -9132,7 +9329,7 @@ class Orchestrator extends AgentBase {
           context.requirements?.projectName || "My Project"
         );
       }
-      await updateRunStatus(runId, "done");
+      await updateRunStatus(runId, "done", void 0, this.env);
       console.log(`
 ✅ Orchestrator done — ${Object.keys(allFiles).length} files generated`);
       return {
@@ -9228,6 +9425,7 @@ class Orchestrator extends AgentBase {
 }
 
 async function action$1({ request, context }) {
+  const { query } = await Promise.resolve().then(() => db_server);
   const body = await request.json();
   const { userRequest, chatId } = body;
   if (!userRequest || !chatId) {
@@ -9251,15 +9449,16 @@ async function action$1({ request, context }) {
         try {
           await query(
             `INSERT INTO agent_tasks 
-             (run_id, agent_name, status, input, output, started_at, completed_at)
-             VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`,
+          (run_id, agent_name, status, input, output, started_at, completed_at)
+          VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`,
             [
               event.runId,
               event.agentName,
               event.status,
               JSON.stringify({ message: event.message }),
               event.data ? JSON.stringify(event.data) : null
-            ]
+            ],
+            context.cloudflare?.env
           );
         } catch (e) {
           console.error("Failed to save progress:", e);
@@ -9286,7 +9485,8 @@ async function action$1({ request, context }) {
     }, { status: 500 });
   }
 }
-async function loader$4({ request }) {
+async function loader$4({ request, context }) {
+  const { query } = await Promise.resolve().then(() => db_server);
   const url = new URL(request.url);
   const runId = url.searchParams.get("runId");
   if (!runId) {
@@ -9295,14 +9495,16 @@ async function loader$4({ request }) {
   try {
     const runResult = await query(
       "SELECT * FROM agent_runs WHERE id = $1",
-      [runId]
+      [runId],
+      context.cloudflare?.env
     );
     const tasksResult = await query(
       `SELECT agent_name, status, output, started_at, completed_at 
        FROM agent_tasks 
        WHERE run_id = $1 
        ORDER BY started_at ASC`,
-      [runId]
+      [runId],
+      context.cloudflare?.env
     );
     return json({
       run: runResult.rows[0] || null,
@@ -9776,19 +9978,6 @@ async function action(args) {
   return chatAction(args);
 }
 const logger$5 = createScopedLogger("api.chat");
-function parseCookies(cookieHeader) {
-  const cookies = {};
-  const items = cookieHeader.split(";").map((cookie) => cookie.trim());
-  items.forEach((item) => {
-    const [name, ...rest] = item.split("=");
-    if (name && rest) {
-      const decodedName = decodeURIComponent(name.trim());
-      const decodedValue = decodeURIComponent(rest.join("=").trim());
-      cookies[decodedName] = decodedValue;
-    }
-  });
-  return cookies;
-}
 async function chatAction({ context, request }) {
   const streamRecovery = new StreamRecoveryManager({
     timeout: 45e3,
@@ -9798,15 +9987,10 @@ async function chatAction({ context, request }) {
     }
   });
   const { messages, files, promptId, contextOptimization, supabase, chatMode, designScheme, maxLLMSteps } = await request.json();
-  const cookieHeader = request.headers.get("Cookie");
   const env = context.cloudflare?.env || {};
   const providerName = env.PROVIDER_NAME || "";
-  const apiKeys = {
-    [providerName]: env.PROVIDER_API_KEY || ""
-  };
-  const providerSettings = JSON.parse(
-    parseCookies(cookieHeader || "").providers || "{}"
-  );
+  const apiKeys = providerName && env.PROVIDER_API_KEY ? { [providerName]: env.PROVIDER_API_KEY } : {};
+  const providerSettings = {};
   const stream = new SwitchableStream();
   const cumulativeUsage = {
     completionTokens: 0,
@@ -10041,6 +10225,7 @@ ${CONTINUE_PROMPT}`
       },
       onError: (error) => {
         const errorMessage = error.message || "Unknown error";
+        return `RAW DEBUG ERROR: ${errorMessage} | Full: ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`;
         if (errorMessage.includes("model") && errorMessage.includes("not found")) {
           return "Custom error: Invalid model selected. Please check that the model name is correct and available.";
         }
@@ -11940,7 +12125,7 @@ async function newShellProcess(webcontainer, terminal) {
         }
         terminal.write(data);
         try {
-          import('./debugLogger-D9rk2-cv.js').then(({ captureTerminalLog }) => {
+          import('./debugLogger-CWBzB6Jh.js').then(({ captureTerminalLog }) => {
             const cleanData = data.replace(/\x1b\[[0-9;]*[mG]/g, "").trim();
             if (cleanData) {
               captureTerminalLog(cleanData, "output");
@@ -11956,7 +12141,7 @@ async function newShellProcess(webcontainer, terminal) {
     if (isInteractive) {
       input.write(data);
       try {
-        import('./debugLogger-D9rk2-cv.js').then(({ captureTerminalLog }) => {
+        import('./debugLogger-CWBzB6Jh.js').then(({ captureTerminalLog }) => {
           const cleanData = data.replace(/\x1b\[[0-9;]*[A-Z]/g, "").trim();
           if (cleanData && cleanData !== "\r" && cleanData !== "\n") {
             captureTerminalLog(cleanData, "input");
@@ -12203,6 +12388,10 @@ const chatStore = map({
   aborted: false,
   showChat: true
 });
+
+const sidebarOpen = atom(false);
+atom(0);
+atom(null);
 
 atom(void 0);
 const description = atom(void 0);
@@ -12545,7 +12734,7 @@ class WorkbenchStore {
   addArtifact({ messageId, title, id, type }) {
     const artifactId = id ?? messageId;
     const artifact = this.#getArtifact(artifactId);
-    if (artifact) {
+    if (artifact && artifact.runner && typeof artifact.runner.actions?.listen === "function") {
       return;
     }
     if (!this.artifactIdList.includes(artifactId)) {
@@ -12595,8 +12784,8 @@ class WorkbenchStore {
   async _addAction(data) {
     const { artifactId } = data;
     const artifact = this.#getArtifact(artifactId);
-    if (!artifact) {
-      unreachable("Artifact not found");
+    if (!artifact?.runner) {
+      return;
     }
     return artifact.runner.addAction(data);
   }
@@ -12610,8 +12799,8 @@ class WorkbenchStore {
   async _runAction(data, isStreaming = false) {
     const { artifactId } = data;
     const artifact = this.#getArtifact(artifactId);
-    if (!artifact) {
-      unreachable("Artifact not found");
+    if (!artifact?.runner) {
+      return;
     }
     const action = artifact.runner.actions.get()[data.actionId];
     if (!action || action.executed) {
@@ -12619,7 +12808,13 @@ class WorkbenchStore {
     }
     if (data.action?.type === "file") {
       const wc = await webcontainer;
-      const fullPath = path.join(wc.workdir, data.action?.filePath ?? "");
+      const rawPath = data.action?.filePath ?? "";
+      const relPath = rawPath.replace("/home/project/", "").replace(/^\/+/, "");
+      const fullPath = path.join(wc.workdir, relPath || rawPath);
+      const content = data.action?.content ?? "";
+      if (relPath) {
+        this.files.setKey(relPath, { type: "file", content, isBinary: false });
+      }
       if (this.selectedFile.value !== fullPath) {
         this.setSelectedFile(fullPath);
       }
@@ -12630,7 +12825,7 @@ class WorkbenchStore {
       if (!doc) {
         await artifact.runner.runAction(data, isStreaming);
       }
-      this.#editorStore.updateFile(fullPath, data.action?.content ?? "");
+      this.#editorStore.updateFile(fullPath, content);
       if (!isStreaming && data.action?.content) {
         await this.saveFile(fullPath);
       }
@@ -14642,8 +14837,6 @@ const HeaderActionButtons = undefined;
 
 const ChatDescription = undefined;
 
-const sidebarOpen = atom(false);
-
 function Header() {
   const chat = useStore(chatStore);
   const isOpen = useStore(sidebarOpen);
@@ -15013,7 +15206,7 @@ const route42 = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({
   meta
 }, Symbol.toStringTag, { value: 'Module' }));
 
-const serverManifest = {'entry':{'module':'/assets/entry.client-Cy4_-gvi.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes':{'root':{'id':'root','parentId':undefined,'path':'','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/root-Dkv8Z103.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-Chk4CT11.js'],'css':['/assets/root-BgZptVhq.css']},'routes/api.configured-providers':{'id':'routes/api.configured-providers','parentId':'root','path':'api/configured-providers','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.configured-providers-l0sNRNKZ.js','imports':[],'css':[]},'routes/webcontainer.connect.$id':{'id':'routes/webcontainer.connect.$id','parentId':'root','path':'webcontainer/connect/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/webcontainer.connect._id-l0sNRNKZ.js','imports':[],'css':[]},'routes/webcontainer.preview.$id':{'id':'routes/webcontainer.preview.$id','parentId':'root','path':'webcontainer/preview/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/webcontainer.preview._id-Brb4CmdH.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.system.diagnostics':{'id':'routes/api.system.diagnostics','parentId':'root','path':'api/system/diagnostics','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.diagnostics-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.mcp-update-config':{'id':'routes/api.mcp-update-config','parentId':'root','path':'api/mcp-update-config','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.mcp-update-config-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.models.$provider':{'id':'routes/api.models.$provider','parentId':'routes/api.models','path':':provider','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.models._provider-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.system.disk-info':{'id':'routes/api.system.disk-info','parentId':'root','path':'api/system/disk-info','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.disk-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.export-api-keys':{'id':'routes/api.export-api-keys','parentId':'root','path':'api/export-api-keys','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.export-api-keys-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-branches':{'id':'routes/api.github-branches','parentId':'root','path':'api/github-branches','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-branches-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-template':{'id':'routes/api.github-template','parentId':'root','path':'api/github-template','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-template-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.gitlab-branches':{'id':'routes/api.gitlab-branches','parentId':'root','path':'api/gitlab-branches','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.gitlab-branches-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.gitlab-projects':{'id':'routes/api.gitlab-projects','parentId':'root','path':'api/gitlab-projects','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.gitlab-projects-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.system.git-info':{'id':'routes/api.system.git-info','parentId':'root','path':'api/system/git-info','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.git-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.netlify-deploy':{'id':'routes/api.netlify-deploy','parentId':'root','path':'api/netlify-deploy','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.netlify-deploy-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.check-env-key':{'id':'routes/api.check-env-key','parentId':'root','path':'api/check-env-key','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.check-env-key-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.vercel-deploy':{'id':'routes/api.vercel-deploy','parentId':'root','path':'api/vercel-deploy','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.vercel-deploy-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.agent.status':{'id':'routes/api.agent.status','parentId':'routes/api.agent','path':'status','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.agent.status-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-stats':{'id':'routes/api.github-stats','parentId':'root','path':'api/github-stats','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-stats-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.netlify-user':{'id':'routes/api.netlify-user','parentId':'root','path':'api/netlify-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.netlify-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.git-proxy.$':{'id':'routes/api.git-proxy.$','parentId':'root','path':'api/git-proxy/*','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.git-proxy._-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-user':{'id':'routes/api.github-user','parentId':'root','path':'api/github-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.vercel-user':{'id':'routes/api.vercel-user','parentId':'root','path':'api/vercel-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.vercel-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.bug-report':{'id':'routes/api.bug-report','parentId':'root','path':'api/bug-report','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.bug-report-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.web-search':{'id':'routes/api.web-search','parentId':'root','path':'api/web-search','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.web-search-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.mcp-check':{'id':'routes/api.mcp-check','parentId':'root','path':'api/mcp-check','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.mcp-check-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.enhancer':{'id':'routes/api.enhancer','parentId':'root','path':'api/enhancer','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.enhancer-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.git-info':{'id':'routes/api.git-info','parentId':'root','path':'api/git-info','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.git-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.projects':{'id':'routes/api.projects','parentId':'root','path':'api/projects','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.projects-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.llmcall':{'id':'routes/api.llmcall','parentId':'root','path':'api/llmcall','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.llmcall-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.logout':{'id':'routes/auth.logout','parentId':'root','path':'auth/logout','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.logout-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.signup':{'id':'routes/auth.signup','parentId':'root','path':'auth/signup','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.signup-jo4f5nVm.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.health':{'id':'routes/api.health','parentId':'root','path':'api/health','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.health-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.models':{'id':'routes/api.models','parentId':'root','path':'api/models','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.models-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.social':{'id':'routes/api.social','parentId':'root','path':'api/social','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.social-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.update':{'id':'routes/api.update','parentId':'root','path':'api/update','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.update-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.login':{'id':'routes/auth.login','parentId':'root','path':'auth/login','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.login-BoH3eejp.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.agent':{'id':'routes/api.agent','parentId':'root','path':'api/agent','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.agent-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.chat':{'id':'routes/api.chat','parentId':'root','path':'api/chat','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.chat-l0sNRNKZ.js','imports':[],'css':[]},'routes/chat.$id':{'id':'routes/chat.$id','parentId':'root','path':'chat/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/chat._id-B2mp0H9g.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-Chk4CT11.js','/assets/index-C5xPxFrt.js','/assets/mobile-CgNUft6J.js'],'css':['/assets/index-BJyyulAC.css']},'routes/_index':{'id':'routes/_index','parentId':'root','path':undefined,'index':true,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/_index-Dov09ugr.js','imports':['/assets/chat._id-B2mp0H9g.js','/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-Chk4CT11.js','/assets/index-C5xPxFrt.js','/assets/mobile-CgNUft6J.js'],'css':['/assets/index-BJyyulAC.css']},'routes/guest':{'id':'routes/guest','parentId':'root','path':'guest','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/guest-2lSBb6H8.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-Chk4CT11.js','/assets/index-C5xPxFrt.js','/assets/mobile-CgNUft6J.js'],'css':['/assets/index-BJyyulAC.css']},'routes/git':{'id':'routes/git','parentId':'root','path':'git','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/git-D37hQ985.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-Chk4CT11.js','/assets/index-C5xPxFrt.js','/assets/mobile-CgNUft6J.js'],'css':['/assets/index-BJyyulAC.css']}},'url':'/assets/manifest-6facebc0.js','version':'6facebc0'};
+const serverManifest = {'entry':{'module':'/assets/entry.client-Cy4_-gvi.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes':{'root':{'id':'root','parentId':undefined,'path':'','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/root-DG4XXkjf.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-DSbDhvEZ.js'],'css':['/assets/root-CXedhVvl.css']},'routes/api.configured-providers':{'id':'routes/api.configured-providers','parentId':'root','path':'api/configured-providers','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.configured-providers-l0sNRNKZ.js','imports':[],'css':[]},'routes/webcontainer.connect.$id':{'id':'routes/webcontainer.connect.$id','parentId':'root','path':'webcontainer/connect/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/webcontainer.connect._id-l0sNRNKZ.js','imports':[],'css':[]},'routes/webcontainer.preview.$id':{'id':'routes/webcontainer.preview.$id','parentId':'root','path':'webcontainer/preview/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/webcontainer.preview._id-Brb4CmdH.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.system.diagnostics':{'id':'routes/api.system.diagnostics','parentId':'root','path':'api/system/diagnostics','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.diagnostics-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.mcp-update-config':{'id':'routes/api.mcp-update-config','parentId':'root','path':'api/mcp-update-config','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.mcp-update-config-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.models.$provider':{'id':'routes/api.models.$provider','parentId':'routes/api.models','path':':provider','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.models._provider-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.system.disk-info':{'id':'routes/api.system.disk-info','parentId':'root','path':'api/system/disk-info','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.disk-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.export-api-keys':{'id':'routes/api.export-api-keys','parentId':'root','path':'api/export-api-keys','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.export-api-keys-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-branches':{'id':'routes/api.github-branches','parentId':'root','path':'api/github-branches','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-branches-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-template':{'id':'routes/api.github-template','parentId':'root','path':'api/github-template','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-template-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.gitlab-branches':{'id':'routes/api.gitlab-branches','parentId':'root','path':'api/gitlab-branches','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.gitlab-branches-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.gitlab-projects':{'id':'routes/api.gitlab-projects','parentId':'root','path':'api/gitlab-projects','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.gitlab-projects-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.system.git-info':{'id':'routes/api.system.git-info','parentId':'root','path':'api/system/git-info','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.git-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.netlify-deploy':{'id':'routes/api.netlify-deploy','parentId':'root','path':'api/netlify-deploy','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.netlify-deploy-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.check-env-key':{'id':'routes/api.check-env-key','parentId':'root','path':'api/check-env-key','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.check-env-key-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.vercel-deploy':{'id':'routes/api.vercel-deploy','parentId':'root','path':'api/vercel-deploy','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.vercel-deploy-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.agent.status':{'id':'routes/api.agent.status','parentId':'routes/api.agent','path':'status','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.agent.status-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-stats':{'id':'routes/api.github-stats','parentId':'root','path':'api/github-stats','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-stats-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.netlify-user':{'id':'routes/api.netlify-user','parentId':'root','path':'api/netlify-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.netlify-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.git-proxy.$':{'id':'routes/api.git-proxy.$','parentId':'root','path':'api/git-proxy/*','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.git-proxy._-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-user':{'id':'routes/api.github-user','parentId':'root','path':'api/github-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.vercel-user':{'id':'routes/api.vercel-user','parentId':'root','path':'api/vercel-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.vercel-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.bug-report':{'id':'routes/api.bug-report','parentId':'root','path':'api/bug-report','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.bug-report-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.web-search':{'id':'routes/api.web-search','parentId':'root','path':'api/web-search','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.web-search-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.mcp-check':{'id':'routes/api.mcp-check','parentId':'root','path':'api/mcp-check','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.mcp-check-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.enhancer':{'id':'routes/api.enhancer','parentId':'root','path':'api/enhancer','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.enhancer-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.git-info':{'id':'routes/api.git-info','parentId':'root','path':'api/git-info','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.git-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.projects':{'id':'routes/api.projects','parentId':'root','path':'api/projects','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.projects-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.llmcall':{'id':'routes/api.llmcall','parentId':'root','path':'api/llmcall','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.llmcall-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.logout':{'id':'routes/auth.logout','parentId':'root','path':'auth/logout','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.logout-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.signup':{'id':'routes/auth.signup','parentId':'root','path':'auth/signup','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.signup-jo4f5nVm.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.health':{'id':'routes/api.health','parentId':'root','path':'api/health','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.health-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.models':{'id':'routes/api.models','parentId':'root','path':'api/models','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.models-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.social':{'id':'routes/api.social','parentId':'root','path':'api/social','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.social-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.update':{'id':'routes/api.update','parentId':'root','path':'api/update','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.update-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.login':{'id':'routes/auth.login','parentId':'root','path':'auth/login','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.login-BoH3eejp.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.agent':{'id':'routes/api.agent','parentId':'root','path':'api/agent','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.agent-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.chat':{'id':'routes/api.chat','parentId':'root','path':'api/chat','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.chat-l0sNRNKZ.js','imports':[],'css':[]},'routes/chat.$id':{'id':'routes/chat.$id','parentId':'root','path':'chat/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/chat._id-Cla4apXv.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-DSbDhvEZ.js','/assets/index-r5QYNQXf.js','/assets/mobile-CY9VsZGi.js'],'css':['/assets/index-BJyyulAC.css']},'routes/_index':{'id':'routes/_index','parentId':'root','path':undefined,'index':true,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/_index-BAwwMpXG.js','imports':['/assets/chat._id-Cla4apXv.js','/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-DSbDhvEZ.js','/assets/index-r5QYNQXf.js','/assets/mobile-CY9VsZGi.js'],'css':['/assets/index-BJyyulAC.css']},'routes/guest':{'id':'routes/guest','parentId':'root','path':'guest','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/guest-DetG6s7J.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-DSbDhvEZ.js','/assets/index-r5QYNQXf.js','/assets/mobile-CY9VsZGi.js'],'css':['/assets/index-BJyyulAC.css']},'routes/git':{'id':'routes/git','parentId':'root','path':'git','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/git-CrmRWifF.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-DSbDhvEZ.js','/assets/index-r5QYNQXf.js','/assets/mobile-CY9VsZGi.js'],'css':['/assets/index-BJyyulAC.css']}},'url':'/assets/manifest-c3b749a7.js','version':'c3b749a7'};
 
 /**
        * `mode` is only relevant for the old Remix compiler but

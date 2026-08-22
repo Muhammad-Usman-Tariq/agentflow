@@ -7,6 +7,7 @@ import {
   OllamaProvider,
   OpenRouterProvider,
   OpenAIProvider,
+  OpenAILikeProvider,
 } from './registry';
 import type { ModelInfo } from './types';
 
@@ -38,6 +39,7 @@ export class LLMManager {
       new OllamaProvider(),
       new OpenRouterProvider(),
       new OpenAIProvider(),
+      new OpenAILikeProvider(),
     ];
     for (const provider of allProviders) {
       this._providers.set(provider.name.toLowerCase(), provider);

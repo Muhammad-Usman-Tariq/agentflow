@@ -4,6 +4,7 @@ import GroqProvider from './providers/groq';
 import OllamaProvider from './providers/ollama';
 import OpenRouterProvider from './providers/open-router';
 import OpenAIProvider from './providers/openai';
+import OpenAILikeProvider from './providers/openai-like';
 
 // Dynamic provider — PROVIDER_NAME ENV se auto-detect
 // Koi bhi OpenAI-compatible server kaam karega
@@ -46,4 +47,5 @@ export {
   OllamaProvider,
   OpenRouterProvider,
   OpenAIProvider,
+  OpenAILikeProvider,
 };

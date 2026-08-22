@@ -1,4 +1,4 @@
-import { l as logger, D as DEFAULT_MODEL, P as PROVIDER_LIST } from './server-build--37TWUlw.js';
+import { l as logger, D as DEFAULT_MODEL, P as PROVIDER_LIST } from './server-build-DpPPNfS2.js';
 import 'react/jsx-runtime';
 import '@remix-run/react';
 import 'isbot';
@@ -27,7 +27,6 @@ import '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import 'zod';
 import 'jszip';
 import 'crypto';
-import 'pg';
 import '@octokit/rest';
 import 'rehype-sanitize';
 import 'ignore';
@@ -60,7 +59,7 @@ let logStore = null;
 const getLogStore = () => {
   if (!logStore && typeof window !== "undefined") {
     try {
-      import('./server-build--37TWUlw.js').then(n => n.c).then(({ logStore: store }) => {
+      import('./server-build-DpPPNfS2.js').then(n => n.c).then(({ logStore: store }) => {
         logStore = store;
       }).catch(() => {
       });
@@ -531,7 +530,7 @@ class DebugLogger {
       const store = getLogStore();
       if (!store) {
         try {
-          const { logStore: storeModule } = await import('./server-build--37TWUlw.js').then(n => n.c);
+          const { logStore: storeModule } = await import('./server-build-DpPPNfS2.js').then(n => n.c);
           logStore = storeModule;
           return this._getLogStoreLogs();
         } catch {
