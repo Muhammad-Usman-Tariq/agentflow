@@ -150,6 +150,17 @@ export abstract class AgentBase implements IAgent {
       { role: 'user', content: userMessage },
     ];
 
+    // ⚠️ FIX: was hardcoded to 8000 everywhere, ignoring MAX_COMPLETION_TOKENS
+    // — the same env var stream-text.ts already reads for the main chat path.
+    // This is the reason the coder agent kept truncating: a self-hosted small
+    // model needs a different budget than a fast cloud API, and there was no
+    // way to configure it without editing code. Now it follows the same
+    // .env-driven convention as the rest of the app.
+    const envMaxTokens = this.env?.MAX_COMPLETION_TOKENS
+      ? parseInt(this.env.MAX_COMPLETION_TOKENS, 10)
+      : (process.env.MAX_COMPLETION_TOKENS ? parseInt(process.env.MAX_COMPLETION_TOKENS, 10) : NaN);
+    const maxTokens = Number.isFinite(envMaxTokens) && envMaxTokens > 0 ? envMaxTokens : 8000;
+
     let apiUrl = '';
     let headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -166,7 +177,7 @@ export abstract class AgentBase implements IAgent {
       };
       bodyPayload = {
         model,
-        max_tokens: 8000,
+        max_tokens: maxTokens,
         system: systemPrompt,
         messages: [{ role: 'user', content: userMessage }],
       };
@@ -179,7 +190,7 @@ export abstract class AgentBase implements IAgent {
     } else {
       const detectedUrl = baseUrl || this.autoDetectBaseUrl(name);
       apiUrl = `${detectedUrl}/chat/completions`;
-      bodyPayload = { model, max_tokens: 8000, messages };
+      bodyPayload = { model, max_tokens: maxTokens, messages };
     }
 
     const response = await fetch(apiUrl, {
