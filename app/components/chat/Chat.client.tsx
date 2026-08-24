@@ -204,6 +204,14 @@ export const ChatImpl = memo(
       if (prompt) {
         setSearchParams({});
         runAnimation();
+        // ⚠️ FIX: this path (starting a brand-new project from the homepage's
+        // initial prompt box) called append() directly without ever setting
+        // pendingAgentMessageRef — meaning the backend orchestrator (/api/agent)
+        // NEVER ran for a project's first message, only for later ones typed
+        // into the chat box via sendMessage(). Since the first message usually
+        // carries the actual requirements, this meant backend/database
+        // generation silently never happened for new projects.
+        pendingAgentMessageRef.current = prompt;
         append({
           role: 'user',
           content: `[Model: ${model}]\n\n[Provider: ${provider.name}]\n\n${prompt}`,
