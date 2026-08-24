@@ -167,6 +167,17 @@ export abstract class AgentBase implements IAgent {
       'Authorization': `Bearer ${apiKey}`,
     };
     let bodyPayload: any = {};
+    // ⚠️ FIX: Cloudflare (non-Enterprise plans) hard-kills any proxied,
+    // NON-STREAMING HTTP request/response after ~100 seconds with a 524
+    // error — regardless of any timeoutMs we configure in our own JS code.
+    // Our self-hosted Kaggle/Qwen backend regularly takes longer than that
+    // for a single call. Streaming (SSE) responses aren't subject to the
+    // same hard cutoff as long as data keeps flowing, so OpenAI-compatible
+    // calls (our own backend, Groq, OpenRouter, etc.) now request
+    // stream: true and are parsed as SSE, same as the main /api/chat path
+    // already does. This directly fixes the ARCHITECT/CODER/etc. "524:
+    // error code: 524" failures.
+    let isStreamingRequest = false;
 
     if (name === 'anthropic') {
       apiUrl = 'https://api.anthropic.com/v1/messages';
@@ -190,7 +201,8 @@ export abstract class AgentBase implements IAgent {
     } else {
       const detectedUrl = baseUrl || this.autoDetectBaseUrl(name);
       apiUrl = `${detectedUrl}/chat/completions`;
-      bodyPayload = { model, max_tokens: maxTokens, messages };
+      bodyPayload = { model, max_tokens: maxTokens, messages, stream: true };
+      isStreamingRequest = true;
     }
 
     const response = await fetch(apiUrl, {
@@ -202,6 +214,10 @@ export abstract class AgentBase implements IAgent {
     if (!response.ok) {
       const errText = await response.text();
       throw new Error(`${response.status}: ${errText}`);
+    }
+
+    if (isStreamingRequest) {
+      return await this.readSseStream(response);
     }
 
     const data = await response.json() as any;
@@ -216,6 +232,51 @@ export abstract class AgentBase implements IAgent {
     }
 
     return text;
+  }
+
+  // Read an OpenAI-compatible SSE stream (data: {...}\n\n chunks, ending in
+  // "data: [DONE]") and assemble it into the full completion text, the same
+  // shape callProvider's non-streaming branches already return.
+  private async readSseStream(response: Response): Promise<string> {
+    const reader = response.body?.getReader();
+    if (!reader) {
+      // Fallback: some runtimes might not expose a streamable body the same
+      // way — try reading it as plain text/JSON as a last resort.
+      const data = await response.json() as any;
+      return data.choices?.[0]?.message?.content || '';
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let fullText = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ''; // keep the last, possibly-incomplete line
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+
+        const payload = trimmed.slice(5).trim();
+        if (payload === '[DONE]') continue;
+
+        try {
+          const chunk = JSON.parse(payload);
+          const delta = chunk.choices?.[0]?.delta?.content;
+          if (delta) fullText += delta;
+        } catch {
+          // Ignore malformed/partial SSE lines rather than aborting the
+          // whole response over one bad chunk.
+        }
+      }
+    }
+
+    return fullText;
   }
 
   private autoDetectBaseUrl(providerName: string): string {
@@ -247,9 +308,20 @@ export abstract class AgentBase implements IAgent {
 
   protected extractJson(text: string): string {
     let cleaned = text
-      .replace(/```json\s*/gi, '')
-      .replace(/```\s*/g, '')
+      .replace(/```json\n?/g, '')
+      .replace(/```\n?/g, '')
       .trim();
+
+    // ⚠️ FIX: small models sometimes abbreviate JSON output with a JS-style
+    // comment instead of writing everything out, e.g.
+    // `"categories": [ ... ] // Add more categories here` — this isn't
+    // valid JSON and was causing "Failed to extract valid JSON" errors
+    // (seen on the data agent). Strip `//comment` text, but only OUTSIDE
+    // string literals, so URLs like "https://..." inside actual string
+    // values are left untouched.
+    cleaned = cleaned.replace(/("(?:[^"\\]|\\.)*")|(\/\/[^\n]*)/g, (_match, stringLiteral) =>
+      stringLiteral !== undefined ? stringLiteral : ''
+    );
 
     const firstBrace = cleaned.indexOf('{');
     const firstBracket = cleaned.indexOf('[');
@@ -261,146 +333,33 @@ export abstract class AgentBase implements IAgent {
 
     if (start === -1) throw new Error('No JSON found in LLM response');
 
-    let end = this.findMatchingJsonEnd(cleaned, start);
-    if (end === -1) {
-      const lastBrace = cleaned.lastIndexOf('}');
-      const lastBracket = cleaned.lastIndexOf(']');
-      end = Math.max(lastBrace, lastBracket);
-    }
+    const lastBrace = cleaned.lastIndexOf('}');
+    const lastBracket = cleaned.lastIndexOf(']');
+    const end = Math.max(lastBrace, lastBracket);
 
-    if (end === -1 || end < start) throw new Error('Invalid JSON in LLM response');
+    if (end === -1) throw new Error('Invalid JSON in LLM response');
 
     cleaned = cleaned.substring(start, end + 1);
     cleaned = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+    // Strip trailing commas before a closing brace/bracket — another common
+    // small-model JSON mistake (and can appear after comment-stripping above).
+    cleaned = cleaned.replace(/,(\s*[}\]])/g, '$1');
 
     try {
       JSON.parse(cleaned);
       return cleaned;
-    } catch (e1) {
-      try {
-        const repaired = this.repairJsonStrings(cleaned);
-        JSON.parse(repaired);
-        return repaired;
-      } catch (e2) {
-        try {
-          const salvaged = this.salvageTruncatedJson(cleaned);
-          JSON.parse(salvaged);
-          return salvaged;
-        } catch (e3) {
-          throw new Error(`Failed to extract valid JSON from LLM response: ${e1}`);
-        }
-      }
+    } catch {
+      cleaned = cleaned.replace(
+        /"((?:[^"\\]|\\.)*)"/g,
+        (_match, p1) => `"${p1
+          .replace(/\n/g, '\\n')
+          .replace(/\r/g, '\\r')
+          .replace(/\t/g, '\\t')
+        }"`
+      );
+      JSON.parse(cleaned);
+      return cleaned;
     }
-  }
-
-  private findMatchingJsonEnd(str: string, start: number): number {
-    let depth = 0;
-    let inString = false;
-    let isEscaped = false;
-
-    for (let i = start; i < str.length; i++) {
-      const char = str[i];
-      if (isEscaped) {
-        isEscaped = false;
-        continue;
-      }
-      if (char === '\\' && inString) {
-        isEscaped = true;
-        continue;
-      }
-      if (char === '"') {
-        inString = !inString;
-        continue;
-      }
-      if (!inString) {
-        if (char === '{' || char === '[') {
-          depth++;
-        } else if (char === '}' || char === ']') {
-          depth--;
-          if (depth === 0) {
-            return i;
-          }
-        }
-      }
-    }
-    return -1;
-  }
-
-  private repairJsonStrings(jsonStr: string): string {
-    let result = '';
-    let inString = false;
-    let isEscaped = false;
-
-    for (let i = 0; i < jsonStr.length; i++) {
-      const char = jsonStr[i];
-      if (isEscaped) {
-        result += char;
-        isEscaped = false;
-        continue;
-      }
-      if (char === '\\' && inString) {
-        result += char;
-        isEscaped = true;
-        continue;
-      }
-      if (char === '"') {
-        inString = !inString;
-        result += char;
-        continue;
-      }
-      if (inString) {
-        if (char === '\n') result += '\\n';
-        else if (char === '\r') result += '\\r';
-        else if (char === '\t') result += '\\t';
-        else result += char;
-      } else {
-        result += char;
-      }
-    }
-    return result;
-  }
-
-  private salvageTruncatedJson(jsonStr: string): string {
-    let stack: string[] = [];
-    let inString = false;
-    let isEscaped = false;
-
-    for (let i = 0; i < jsonStr.length; i++) {
-      const char = jsonStr[i];
-      if (isEscaped) {
-        isEscaped = false;
-        continue;
-      }
-      if (char === '\\' && inString) {
-        isEscaped = true;
-        continue;
-      }
-      if (char === '"') {
-        inString = !inString;
-        continue;
-      }
-      if (!inString) {
-        if (char === '{') stack.push('}');
-        else if (char === '[') stack.push(']');
-        else if (char === '}' || char === ']') {
-          if (stack.length > 0 && stack[stack.length - 1] === char) {
-            stack.pop();
-          }
-        }
-      }
-    }
-
-    let salvaged = jsonStr;
-    if (inString) {
-      salvaged += '"';
-    }
-    salvaged = salvaged.trim().replace(/,\s*$/, '');
-
-    while (stack.length > 0) {
-      salvaged += stack.pop();
-    }
-
-    return salvaged;
   }
 
   protected parseJson<T>(jsonString: string): T {
