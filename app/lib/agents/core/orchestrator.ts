@@ -66,7 +66,12 @@ export class Orchestrator extends AgentBase {
       };
 
       // Step 4 — Execute all agents
-      const context = await runAgentPlan(agentPlan, onProgress);
+      const { context, failures } = await runAgentPlan(agentPlan, onProgress);
+
+      if (failures.length > 0) {
+        console.warn(`\n⚠️ ${failures.length} agent(s) failed:`);
+        failures.forEach(f => console.warn(`  - ${f.agentName}: ${f.error}`));
+      }
 
       // Step 5 — Collect all generated files
       const allFiles: Record<string, string> = {};
@@ -105,11 +110,23 @@ export class Orchestrator extends AgentBase {
 
       console.log(`\n✅ Orchestrator done — ${Object.keys(allFiles).length} files generated`);
 
+      // ⚠️ FIX: this used to always return success: true, even when Coder —
+      // the agent responsible for every real application file — failed
+      // completely and the "files" were just DataAgent's sample data plus
+      // this class's own hardcoded boilerplate package.json/index.html
+      // templates. That made total failures look identical to real success
+      // in the API response, so there was no way to tell the run had
+      // actually produced no working app. Now a Coder failure is reported
+      // as a genuine failure, with its real error message attached.
+      const coderFailed = failures.some(f => f.agentName === 'coder');
+
       return {
-        success: true,
+        success: !coderFailed,
         files: allFiles,
         runId,
-      };
+        ...(failures.length > 0 ? { warnings: failures } : {}),
+        ...(coderFailed ? { error: `Coder agent failed: ${failures.find(f => f.agentName === 'coder')?.error}` } : {}),
+      } as any;
 
     } catch (error: any) {
       console.error('\n❌ Orchestrator failed:', error.message);

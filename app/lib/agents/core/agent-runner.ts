@@ -49,9 +49,14 @@ function getAgent(name: AgentName, env?: Record<string, string>) {
 export async function runAgentPlan(
   plan: AgentPlan,
   onProgress?: ProgressCallback
-): Promise<AgentContext> {
+): Promise<{ context: AgentContext; failures: Array<{ agentName: string; error: string }> }> {
 
   let context: AgentContext = {};
+  // ⚠️ FIX: agent failures were saved to the DB but never bubbled up past
+  // this function — the orchestrator had no way to know Coder (or any
+  // agent) actually failed, so it silently fell back to boilerplate
+  // package.json/index.html and reported "success: true" regardless.
+  const failures: Array<{ agentName: string; error: string }> = [];
 
   await updateRunStatus(plan.runId, 'running', undefined, plan.env);
 
@@ -73,12 +78,14 @@ export async function runAgentPlan(
     if (phase.executionType === 'sequential') {
       // Run agents one by one — each gets previous agent's output
       for (const agentName of validAgents) {
-        context = await runSingleAgent(
+        const result = await runSingleAgent(
           agentName,
           plan,
           context,
           onProgress
         );
+        context = result.context;
+        if (result.failure) failures.push(result.failure);
       }
     } else {
       // Run all agents in this phase simultaneously
@@ -91,14 +98,15 @@ export async function runAgentPlan(
       // Merge all parallel results into context
       for (const result of results) {
         if (result.status === 'fulfilled') {
-          Object.assign(context, result.value);
+          Object.assign(context, result.value.context);
+          if (result.value.failure) failures.push(result.value.failure);
         }
       }
     }
   }
 
   await updateRunStatus(plan.runId, 'done', undefined, plan.env);
-  return context;
+  return { context, failures };
 }
 
 // Run a single agent and update context
@@ -107,7 +115,7 @@ async function runSingleAgent(
   plan: AgentPlan,
   context: AgentContext,
   onProgress?: ProgressCallback
-): Promise<AgentContext> {
+): Promise<{ context: AgentContext; failure?: { agentName: string; error: string } }> {
 
   const agent = getAgent(agentName, plan.env);
 
@@ -144,7 +152,7 @@ async function runSingleAgent(
       data: output.data,
     });
 
-    return updatedContext;
+    return { context: updatedContext };
   } else {
     // Save failure to DB
     await saveAgentTask(plan.runId, agentName, 'failed', input, null, output.error, plan.env);
@@ -157,8 +165,9 @@ async function runSingleAgent(
       message: `${agentName} failed: ${output.error}`,
     });
 
-    // Return unchanged context — other agents continue
-    return context;
+    // Return unchanged context — other agents continue — but now the
+    // failure reason travels back up instead of vanishing here.
+    return { context, failure: { agentName, error: output.error || 'Unknown error' } };
   }
 }
 
