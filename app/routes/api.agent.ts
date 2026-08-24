@@ -48,9 +48,18 @@ export async function action({ request, context }: ActionFunctionArgs) {
     );
 
     if (!result.success) {
+      // ⚠️ FIX: was discarding result.files/warnings/runId whenever
+      // success was false — meaning the detailed per-agent failure list
+      // (added so we could see WHY analyst/architect/coder failed) never
+      // actually reached the client. Now the failure response includes
+      // everything the success response would, just with success:false.
       return json({
         success: false,
         error: result.error,
+        files: result.files,
+        fileCount: Object.keys(result.files || {}).length,
+        runId: result.runId,
+        warnings: (result as any).warnings,
       }, { status: 500 });
     }
 
