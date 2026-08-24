@@ -8,7 +8,7 @@ export class ReviewerAgent extends AgentBase {
   super({
     name: 'reviewer',
     maxRetries: 2,
-    timeoutMs: 60000,
+    timeoutMs: 120000, // ⚠️ was 60000 — bumped for self-hosted Qwen backend
   }, env);
 }
 

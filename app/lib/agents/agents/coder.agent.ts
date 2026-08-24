@@ -7,7 +7,7 @@ export class CoderAgent extends AgentBase {
   super({
     name: 'coder',
     maxRetries: 2,
-    timeoutMs: 120000,
+    timeoutMs: 240000, // ⚠️ was 120000 — writes ALL files (frontend+backend+db), needs the most time on a self-hosted backend
   }, env);
 }
 

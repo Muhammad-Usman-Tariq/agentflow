@@ -22,7 +22,12 @@ export class Orchestrator extends AgentBase {
   super({
     name: 'orchestrator',
     maxRetries: 3,
-    timeoutMs: 30000,
+    // ⚠️ FIX: was 30000 (30s) — fine for fast cloud APIs (OpenAI/Groq) but far
+    // too short for a self-hosted, small-GPU Qwen backend, especially with
+    // long user prompts. Every attempt was timing out before Qwen could even
+    // finish generating, so planning (and the whole orchestrator run) always
+    // failed after 3 wasted attempts.
+    timeoutMs: 120000,
   }, env);
 }
 

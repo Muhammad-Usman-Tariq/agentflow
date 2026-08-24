@@ -8,7 +8,7 @@ export class AnalystAgent extends AgentBase {
   super({
     name: 'analyst',
     maxRetries: 3,
-    timeoutMs: 60000,
+    timeoutMs: 120000, // ⚠️ was 60000 — bumped for self-hosted Qwen backend
   }, env);
 }
 

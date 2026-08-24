@@ -8,7 +8,7 @@ export class ArchitectAgent extends AgentBase {
   super({
     name: 'architect',
     maxRetries: 3,
-    timeoutMs: 60000,
+    timeoutMs: 150000, // ⚠️ was 60000 — now also plans DB schema + API routes, needs more time on a self-hosted backend
   }, env);
 }
 

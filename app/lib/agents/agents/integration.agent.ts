@@ -52,7 +52,7 @@ export class IntegrationAgent extends AgentBase {
   super({
     name: 'integration',
     maxRetries: 3,
-    timeoutMs: 60000,
+    timeoutMs: 120000, // ⚠️ was 60000 — bumped for self-hosted Qwen backend
   }, env);
 }
 
