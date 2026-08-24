@@ -156,6 +156,14 @@ function updateContext(
     case 'coder':       updated.generatedCode = data; break;
     case 'uiux':        updated.designDecisions = data; break;
     case 'reviewer':    updated.reviewFeedback = data; break;
+    // ⚠️ FIX: these two cases were missing entirely — data/integration agents'
+    // outputs were silently dropped (never stored in context), so
+    // orchestrator.ts's file-collection step (which reads
+    // context.dataFiles?.dataFiles and context.integrationData?.files) always
+    // found undefined, even when both agents ran successfully. Their
+    // generated files were computed but never made it into the final output.
+    case 'data':        updated.dataFiles = data; break;
+    case 'integration':  updated.integrationData = data; break;
   }
 
   return updated;

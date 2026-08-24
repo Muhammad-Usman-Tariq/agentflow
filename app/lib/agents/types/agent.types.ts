@@ -13,6 +13,8 @@ export interface AgentContext {
   generatedCode?: Record<string, string>; // From Coder
   designDecisions?: DesignDecisions;    // From UI/UX
   reviewFeedback?: ReviewFeedback;      // From Reviewer
+  dataFiles?: { dataFiles?: Record<string, string>; sampleData?: any };       // From Data agent
+  integrationData?: { files?: Record<string, string>; packages?: string[]; integrations?: string[]; envVariables?: any[] }; // From Integration agent
 }
 
 export interface AgentOutput {
