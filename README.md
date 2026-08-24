@@ -178,7 +178,7 @@ Node.js is required to run the application.
         echo $PATH
         ```
      3. Look for `/usr/local/bin` in the output
-##set tunnel typo fix application  agian try 
+##set agian tunnel
 ## Running the Application
 
 You have two options for running Bolt.DIY: directly on your machine or using Docker.
