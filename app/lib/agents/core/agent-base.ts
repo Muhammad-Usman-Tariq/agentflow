@@ -99,7 +99,16 @@ export abstract class AgentBase implements IAgent {
     const name = e.PROVIDER_NAME || process.env.PROVIDER_NAME;
     const apiKey = e.PROVIDER_API_KEY || process.env.PROVIDER_API_KEY;
     const model = e.DEFAULT_MODEL || process.env.DEFAULT_MODEL || '';
-    const baseUrl = e.PROVIDER_BASE_URL || process.env.PROVIDER_BASE_URL;
+    // ⚠️ FIX: this used to only check PROVIDER_BASE_URL, which was never the
+    // actual configured variable name — the app-wide convention (used by
+    // OpenAILikeProvider elsewhere) is OPENAI_LIKE_API_BASE_URL. Because this
+    // always read as undefined, callProvider() fell through to
+    // autoDetectBaseUrl('openailike'), which isn't in its known-providers map
+    // either, so it silently defaulted to the REAL OpenAI API — sending our
+    // local Colab API key there and getting a 401.
+    const baseUrl =
+      e.OPENAI_LIKE_API_BASE_URL || process.env.OPENAI_LIKE_API_BASE_URL ||
+      e.PROVIDER_BASE_URL || process.env.PROVIDER_BASE_URL;
 
     if (name && apiKey) {
       providers.push({
@@ -210,6 +219,18 @@ export abstract class AgentBase implements IAgent {
       'cerebras':   'https://api.cerebras.ai/v1',
       'xai':        'https://api.x.ai/v1',
     };
+
+    // ⚠️ 'openailike' is intentionally NOT given a default here — its base
+    // URL varies per deployment (e.g. a Colab/LocalTunnel/cloudflared URL
+    // that changes every session), so there is no safe generic default.
+    // If OPENAI_LIKE_API_BASE_URL wasn't set, fail loudly instead of
+    // silently sending the request (and our local API key) to real OpenAI.
+    if (providerName === 'openailike' && !known[providerName]) {
+      throw new Error(
+        'OpenAILike provider has no base URL configured. Set OPENAI_LIKE_API_BASE_URL in your environment.'
+      );
+    }
+
     return known[providerName] || 'https://api.openai.com/v1';
   }
 
