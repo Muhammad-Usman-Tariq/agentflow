@@ -118,14 +118,14 @@ export class Orchestrator extends AgentBase {
       // in the API response, so there was no way to tell the run had
       // actually produced no working app. Now a Coder failure is reported
       // as a genuine failure, with its real error message attached.
-      const coderFailed = failures.some(f => f.agentName === 'coder');
+      const firstCriticalFailure = failures.find(f => ['analyst', 'architect', 'coder'].includes(f.agentName));
 
       return {
-        success: !coderFailed,
+        success: !firstCriticalFailure,
         files: allFiles,
         runId,
         ...(failures.length > 0 ? { warnings: failures } : {}),
-        ...(coderFailed ? { error: `Coder agent failed: ${failures.find(f => f.agentName === 'coder')?.error}` } : {}),
+        ...(firstCriticalFailure ? { error: `${firstCriticalFailure.agentName.toUpperCase()} agent failed: ${firstCriticalFailure.error}` } : {}),
       } as any;
 
     } catch (error: any) {

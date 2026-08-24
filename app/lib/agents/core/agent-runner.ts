@@ -85,7 +85,14 @@ export async function runAgentPlan(
           onProgress
         );
         context = result.context;
-        if (result.failure) failures.push(result.failure);
+        if (result.failure) {
+          failures.push(result.failure);
+          if (['analyst', 'architect', 'coder'].includes(agentName)) {
+            console.error(`[AgentRunner] Critical agent '${agentName}' failed: ${result.failure.error}. Aborting plan execution.`);
+            await updateRunStatus(plan.runId, 'failed', undefined, plan.env);
+            return { context, failures };
+          }
+        }
       }
     } else {
       // Run all agents in this phase simultaneously
@@ -95,12 +102,24 @@ export async function runAgentPlan(
         )
       );
 
+      let criticalFailed = false;
       // Merge all parallel results into context
       for (const result of results) {
         if (result.status === 'fulfilled') {
           Object.assign(context, result.value.context);
-          if (result.value.failure) failures.push(result.value.failure);
+          if (result.value.failure) {
+            failures.push(result.value.failure);
+            if (['analyst', 'architect', 'coder'].includes(result.value.failure.agentName)) {
+              criticalFailed = true;
+            }
+          }
         }
+      }
+
+      if (criticalFailed) {
+        console.error(`[AgentRunner] Critical agent failed in parallel phase. Aborting plan execution.`);
+        await updateRunStatus(plan.runId, 'failed', undefined, plan.env);
+        return { context, failures };
       }
     }
   }

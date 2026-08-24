@@ -247,8 +247,8 @@ export abstract class AgentBase implements IAgent {
 
   protected extractJson(text: string): string {
     let cleaned = text
-      .replace(/```json\n?/g, '')
-      .replace(/```\n?/g, '')
+      .replace(/```json\s*/gi, '')
+      .replace(/```\s*/g, '')
       .trim();
 
     const firstBrace = cleaned.indexOf('{');
@@ -261,11 +261,14 @@ export abstract class AgentBase implements IAgent {
 
     if (start === -1) throw new Error('No JSON found in LLM response');
 
-    const lastBrace = cleaned.lastIndexOf('}');
-    const lastBracket = cleaned.lastIndexOf(']');
-    const end = Math.max(lastBrace, lastBracket);
+    let end = this.findMatchingJsonEnd(cleaned, start);
+    if (end === -1) {
+      const lastBrace = cleaned.lastIndexOf('}');
+      const lastBracket = cleaned.lastIndexOf(']');
+      end = Math.max(lastBrace, lastBracket);
+    }
 
-    if (end === -1) throw new Error('Invalid JSON in LLM response');
+    if (end === -1 || end < start) throw new Error('Invalid JSON in LLM response');
 
     cleaned = cleaned.substring(start, end + 1);
     cleaned = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
@@ -273,18 +276,131 @@ export abstract class AgentBase implements IAgent {
     try {
       JSON.parse(cleaned);
       return cleaned;
-    } catch {
-      cleaned = cleaned.replace(
-        /"((?:[^"\\]|\\.)*)"/g,
-        (_match, p1) => `"${p1
-          .replace(/\n/g, '\\n')
-          .replace(/\r/g, '\\r')
-          .replace(/\t/g, '\\t')
-        }"`
-      );
-      JSON.parse(cleaned);
-      return cleaned;
+    } catch (e1) {
+      try {
+        const repaired = this.repairJsonStrings(cleaned);
+        JSON.parse(repaired);
+        return repaired;
+      } catch (e2) {
+        try {
+          const salvaged = this.salvageTruncatedJson(cleaned);
+          JSON.parse(salvaged);
+          return salvaged;
+        } catch (e3) {
+          throw new Error(`Failed to extract valid JSON from LLM response: ${e1}`);
+        }
+      }
     }
+  }
+
+  private findMatchingJsonEnd(str: string, start: number): number {
+    let depth = 0;
+    let inString = false;
+    let isEscaped = false;
+
+    for (let i = start; i < str.length; i++) {
+      const char = str[i];
+      if (isEscaped) {
+        isEscaped = false;
+        continue;
+      }
+      if (char === '\\' && inString) {
+        isEscaped = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (!inString) {
+        if (char === '{' || char === '[') {
+          depth++;
+        } else if (char === '}' || char === ']') {
+          depth--;
+          if (depth === 0) {
+            return i;
+          }
+        }
+      }
+    }
+    return -1;
+  }
+
+  private repairJsonStrings(jsonStr: string): string {
+    let result = '';
+    let inString = false;
+    let isEscaped = false;
+
+    for (let i = 0; i < jsonStr.length; i++) {
+      const char = jsonStr[i];
+      if (isEscaped) {
+        result += char;
+        isEscaped = false;
+        continue;
+      }
+      if (char === '\\' && inString) {
+        result += char;
+        isEscaped = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = !inString;
+        result += char;
+        continue;
+      }
+      if (inString) {
+        if (char === '\n') result += '\\n';
+        else if (char === '\r') result += '\\r';
+        else if (char === '\t') result += '\\t';
+        else result += char;
+      } else {
+        result += char;
+      }
+    }
+    return result;
+  }
+
+  private salvageTruncatedJson(jsonStr: string): string {
+    let stack: string[] = [];
+    let inString = false;
+    let isEscaped = false;
+
+    for (let i = 0; i < jsonStr.length; i++) {
+      const char = jsonStr[i];
+      if (isEscaped) {
+        isEscaped = false;
+        continue;
+      }
+      if (char === '\\' && inString) {
+        isEscaped = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (!inString) {
+        if (char === '{') stack.push('}');
+        else if (char === '[') stack.push(']');
+        else if (char === '}' || char === ']') {
+          if (stack.length > 0 && stack[stack.length - 1] === char) {
+            stack.pop();
+          }
+        }
+      }
+    }
+
+    let salvaged = jsonStr;
+    if (inString) {
+      salvaged += '"';
+    }
+    salvaged = salvaged.trim().replace(/,\s*$/, '');
+
+    while (stack.length > 0) {
+      salvaged += stack.pop();
+    }
+
+    return salvaged;
   }
 
   protected parseJson<T>(jsonString: string): T {

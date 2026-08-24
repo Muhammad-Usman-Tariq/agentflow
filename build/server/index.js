@@ -1,4 +1,4 @@
-export { s as assets, a as assetsBuildDirectory, b as basename, e as entry, f as future, i as isSpaMode, m as mode, p as publicPath, r as routes } from './assets/server-build-DpPPNfS2.js';
+export { s as assets, a as assetsBuildDirectory, b as basename, e as entry, f as future, i as isSpaMode, m as mode, p as publicPath, r as routes } from './assets/server-build-BwFVNPay.js';
 import 'react/jsx-runtime';
 import '@remix-run/react';
 import 'isbot';
@@ -15,9 +15,9 @@ import 'remix-utils/client-only';
 import 'react-toastify';
 import 'vite-plugin-node-polyfills/shims/process';
 import '@remix-run/cloudflare';
+import '@ai-sdk/openai';
 import '@ai-sdk/anthropic';
 import '@ai-sdk/google';
-import '@ai-sdk/openai';
 import 'ollama-ai-provider';
 import '@openrouter/ai-sdk-provider';
 import 'zustand';

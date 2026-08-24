@@ -1,4 +1,4 @@
-import { l as logger, D as DEFAULT_MODEL, P as PROVIDER_LIST } from './server-build-DpPPNfS2.js';
+import { l as logger, D as DEFAULT_MODEL, P as PROVIDER_LIST } from './server-build-BwFVNPay.js';
 import 'react/jsx-runtime';
 import '@remix-run/react';
 import 'isbot';
@@ -15,9 +15,9 @@ import 'remix-utils/client-only';
 import 'react-toastify';
 import 'vite-plugin-node-polyfills/shims/process';
 import '@remix-run/cloudflare';
+import '@ai-sdk/openai';
 import '@ai-sdk/anthropic';
 import '@ai-sdk/google';
-import '@ai-sdk/openai';
 import 'ollama-ai-provider';
 import '@openrouter/ai-sdk-provider';
 import 'zustand';
@@ -59,7 +59,7 @@ let logStore = null;
 const getLogStore = () => {
   if (!logStore && typeof window !== "undefined") {
     try {
-      import('./server-build-DpPPNfS2.js').then(n => n.c).then(({ logStore: store }) => {
+      import('./server-build-BwFVNPay.js').then(n => n.c).then(({ logStore: store }) => {
         logStore = store;
       }).catch(() => {
       });
@@ -530,7 +530,7 @@ class DebugLogger {
       const store = getLogStore();
       if (!store) {
         try {
-          const { logStore: storeModule } = await import('./server-build-DpPPNfS2.js').then(n => n.c);
+          const { logStore: storeModule } = await import('./server-build-BwFVNPay.js').then(n => n.c);
           logStore = storeModule;
           return this._getLogStoreLogs();
         } catch {

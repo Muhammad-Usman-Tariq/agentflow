@@ -15,9 +15,9 @@ import { ClientOnly } from 'remix-utils/client-only';
 import { cssTransition, ToastContainer } from 'react-toastify';
 import process from 'vite-plugin-node-polyfills/shims/process';
 import { json, createCookieSessionStorage, redirect } from '@remix-run/cloudflare';
+import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import { createOpenAI } from '@ai-sdk/openai';
 import { createOllama } from 'ollama-ai-provider';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { create } from 'zustand';
@@ -139,7 +139,7 @@ let debugLogger = null;
 const getDebugLogger = () => {
   if (!debugLogger && typeof window !== "undefined") {
     try {
-      import('./debugLogger-CWBzB6Jh.js').then(({ debugLogger: loggerInstance }) => {
+      import('./debugLogger-0GOE54E8.js').then(({ debugLogger: loggerInstance }) => {
         debugLogger = loggerInstance;
       }).catch(() => {
       });
@@ -661,7 +661,7 @@ function App() {
       userAgent: navigator.userAgent,
       timestamp: (/* @__PURE__ */ new Date()).toISOString()
     });
-    import('./debugLogger-CWBzB6Jh.js').then(({ debugLogger }) => {
+    import('./debugLogger-0GOE54E8.js').then(({ debugLogger }) => {
       const status = debugLogger.getStatus();
       logStore.logSystem("Debug logging ready", {
         initialized: status.initialized,
@@ -832,6 +832,16 @@ class BaseProvider {
       models
     };
   }
+}
+function getOpenAILikeModel(baseURL, apiKey, model) {
+  const openai = createOpenAI({
+    baseURL,
+    apiKey,
+    headers: {
+      "Bypass-Tunnel-Reminder": "true"
+    }
+  });
+  return openai(model);
 }
 
 class AnthropicProvider extends BaseProvider {
@@ -1373,6 +1383,119 @@ class OpenAIProvider extends BaseProvider {
   }
 }
 
+class OpenAILikeProvider extends BaseProvider {
+  name = "OpenAILike";
+  getApiKeyLink = void 0;
+  config = {
+    baseUrlKey: "OPENAI_LIKE_API_BASE_URL",
+    apiTokenKey: "OPENAI_LIKE_API_KEY",
+    modelsKey: "OPENAI_LIKE_API_MODELS"
+  };
+  staticModels = [];
+  async getDynamicModels(apiKeys, settings, serverEnv = {}) {
+    const { baseUrl, apiKey } = this.getProviderBaseUrlAndKey({
+      apiKeys,
+      providerSettings: settings,
+      serverEnv,
+      defaultBaseUrlKey: "OPENAI_LIKE_API_BASE_URL",
+      defaultApiTokenKey: "OPENAI_LIKE_API_KEY"
+    });
+    if (!baseUrl || !apiKey) {
+      return [];
+    }
+    try {
+      const response = await fetch(`${baseUrl}/models`, {
+        headers: {
+          Authorization: `Bearer ${apiKey}`
+        },
+        signal: this.createTimeoutSignal()
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      const res = await response.json();
+      return res.data.map((model) => ({
+        name: model.id,
+        label: model.id,
+        provider: this.name,
+        maxTokenAllowed: 8e3
+      }));
+    } catch (error) {
+      logger$g.info(`${this.name}: Could not fetch /models endpoint, checking fallback env`, error);
+      const modelsEnv = serverEnv["OPENAI_LIKE_API_MODELS"] || settings?.OPENAI_LIKE_API_MODELS;
+      if (modelsEnv) {
+        logger$g.info(`${this.name}: Using OPENAI_LIKE_API_MODELS fallback`);
+        return this._parseModelsFromEnv(modelsEnv);
+      }
+      return [];
+    }
+  }
+  /**
+   * Parse OPENAI_LIKE_API_MODELS environment variable
+   * Format: path/to/model1:limit;path/to/model2:limit;path/to/model3:limit
+   */
+  _parseModelsFromEnv(modelsEnv) {
+    if (!modelsEnv) {
+      return [];
+    }
+    try {
+      const models = [];
+      const modelEntries = modelsEnv.split(";");
+      for (const entry of modelEntries) {
+        const trimmedEntry = entry.trim();
+        if (!trimmedEntry) {
+          continue;
+        }
+        const [modelPath, limitStr] = trimmedEntry.split(":");
+        if (!modelPath) {
+          continue;
+        }
+        const limit = limitStr ? parseInt(limitStr.trim(), 10) : 8e3;
+        const modelName = modelPath.trim();
+        const label = this._generateModelLabel(modelName);
+        models.push({
+          name: modelName,
+          label,
+          provider: this.name,
+          maxTokenAllowed: limit
+        });
+      }
+      logger$g.info(`${this.name}: Parsed ${models.length} models from env`);
+      return models;
+    } catch (error) {
+      logger$g.error(`${this.name}: Error parsing OPENAI_LIKE_API_MODELS:`, error);
+      return [];
+    }
+  }
+  /**
+   * Generate a readable label from model path
+   */
+  _generateModelLabel(modelPath) {
+    const parts = modelPath.split("/");
+    const lastPart = parts[parts.length - 1];
+    let label = lastPart.replace(/^accounts\//, "").replace(/^fireworks\/models\//, "").replace(/^models\//, "").replace(/\b\w/g, (l) => l.toUpperCase()).replace(/\s+/g, "-");
+    if (!label.includes("Fireworks") && !label.includes("OpenAI")) {
+      label += " (OpenAI Compatible)";
+    }
+    return label;
+  }
+  getModelInstance(options) {
+    const { model, serverEnv, apiKeys, providerSettings } = options;
+    const envRecord = this.convertEnvToRecord(serverEnv);
+    const { baseUrl, apiKey } = this.getProviderBaseUrlAndKey({
+      apiKeys,
+      providerSettings: providerSettings?.[this.name],
+      serverEnv: envRecord,
+      defaultBaseUrlKey: "OPENAI_LIKE_API_BASE_URL",
+      defaultApiTokenKey: "OPENAI_LIKE_API_KEY"
+    });
+    if (!baseUrl || !apiKey) {
+      throw new Error(`Missing configuration for ${this.name} provider`);
+    }
+    return getOpenAILikeModel(baseUrl, apiKey, model);
+  }
+}
+
 class LLMManager {
   static _instance;
   _providers = /* @__PURE__ */ new Map();
@@ -1397,7 +1520,8 @@ class LLMManager {
       new GroqProvider(),
       new OllamaProvider(),
       new OpenRouterProvider(),
-      new OpenAIProvider()
+      new OpenAIProvider(),
+      new OpenAILikeProvider()
     ];
     for (const provider of allProviders) {
       this._providers.set(provider.name.toLowerCase(), provider);
@@ -8497,7 +8621,7 @@ class AgentBase {
     const name = e.PROVIDER_NAME || process.env.PROVIDER_NAME;
     const apiKey = e.PROVIDER_API_KEY || process.env.PROVIDER_API_KEY;
     const model = e.DEFAULT_MODEL || process.env.DEFAULT_MODEL || "";
-    const baseUrl = e.PROVIDER_BASE_URL || process.env.PROVIDER_BASE_URL;
+    const baseUrl = e.OPENAI_LIKE_API_BASE_URL || process.env.OPENAI_LIKE_API_BASE_URL || e.PROVIDER_BASE_URL || process.env.PROVIDER_BASE_URL;
     if (name && apiKey) {
       providers.push({
         name: name.toLowerCase(),
@@ -8528,6 +8652,8 @@ class AgentBase {
       { role: "system", content: systemPrompt },
       { role: "user", content: userMessage }
     ];
+    const envMaxTokens = this.env?.MAX_COMPLETION_TOKENS ? parseInt(this.env.MAX_COMPLETION_TOKENS, 10) : process.env.MAX_COMPLETION_TOKENS ? parseInt(process.env.MAX_COMPLETION_TOKENS, 10) : NaN;
+    const maxTokens = Number.isFinite(envMaxTokens) && envMaxTokens > 0 ? envMaxTokens : 8e3;
     let apiUrl = "";
     let headers = {
       "Content-Type": "application/json",
@@ -8543,7 +8669,7 @@ class AgentBase {
       };
       bodyPayload = {
         model,
-        max_tokens: 8e3,
+        max_tokens: maxTokens,
         system: systemPrompt,
         messages: [{ role: "user", content: userMessage }]
       };
@@ -8558,7 +8684,7 @@ ${userMessage}` }] }]
     } else {
       const detectedUrl = baseUrl || this.autoDetectBaseUrl(name);
       apiUrl = `${detectedUrl}/chat/completions`;
-      bodyPayload = { model, max_tokens: 8e3, messages };
+      bodyPayload = { model, max_tokens: maxTokens, messages };
     }
     const response = await fetch(apiUrl, {
       method: "POST",
@@ -8592,10 +8718,15 @@ ${userMessage}` }] }]
       "cerebras": "https://api.cerebras.ai/v1",
       "xai": "https://api.x.ai/v1"
     };
+    if (providerName === "openailike" && !known[providerName]) {
+      throw new Error(
+        "OpenAILike provider has no base URL configured. Set OPENAI_LIKE_API_BASE_URL in your environment."
+      );
+    }
     return known[providerName] || "https://api.openai.com/v1";
   }
   extractJson(text) {
-    let cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    let cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
     const firstBrace = cleaned.indexOf("{");
     const firstBracket = cleaned.indexOf("[");
     let start = -1;
@@ -8603,23 +8734,134 @@ ${userMessage}` }] }]
     else if (firstBracket === -1) start = firstBrace;
     else start = Math.min(firstBrace, firstBracket);
     if (start === -1) throw new Error("No JSON found in LLM response");
-    const lastBrace = cleaned.lastIndexOf("}");
-    const lastBracket = cleaned.lastIndexOf("]");
-    const end = Math.max(lastBrace, lastBracket);
-    if (end === -1) throw new Error("Invalid JSON in LLM response");
+    let end = this.findMatchingJsonEnd(cleaned, start);
+    if (end === -1) {
+      const lastBrace = cleaned.lastIndexOf("}");
+      const lastBracket = cleaned.lastIndexOf("]");
+      end = Math.max(lastBrace, lastBracket);
+    }
+    if (end === -1 || end < start) throw new Error("Invalid JSON in LLM response");
     cleaned = cleaned.substring(start, end + 1);
     cleaned = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
     try {
       JSON.parse(cleaned);
       return cleaned;
-    } catch {
-      cleaned = cleaned.replace(
-        /"((?:[^"\\]|\\.)*)"/g,
-        (_match, p1) => `"${p1.replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t")}"`
-      );
-      JSON.parse(cleaned);
-      return cleaned;
+    } catch (e1) {
+      try {
+        const repaired = this.repairJsonStrings(cleaned);
+        JSON.parse(repaired);
+        return repaired;
+      } catch (e2) {
+        try {
+          const salvaged = this.salvageTruncatedJson(cleaned);
+          JSON.parse(salvaged);
+          return salvaged;
+        } catch (e3) {
+          throw new Error(`Failed to extract valid JSON from LLM response: ${e1}`);
+        }
+      }
     }
+  }
+  findMatchingJsonEnd(str, start) {
+    let depth = 0;
+    let inString = false;
+    let isEscaped = false;
+    for (let i = start; i < str.length; i++) {
+      const char = str[i];
+      if (isEscaped) {
+        isEscaped = false;
+        continue;
+      }
+      if (char === "\\" && inString) {
+        isEscaped = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (!inString) {
+        if (char === "{" || char === "[") {
+          depth++;
+        } else if (char === "}" || char === "]") {
+          depth--;
+          if (depth === 0) {
+            return i;
+          }
+        }
+      }
+    }
+    return -1;
+  }
+  repairJsonStrings(jsonStr) {
+    let result = "";
+    let inString = false;
+    let isEscaped = false;
+    for (let i = 0; i < jsonStr.length; i++) {
+      const char = jsonStr[i];
+      if (isEscaped) {
+        result += char;
+        isEscaped = false;
+        continue;
+      }
+      if (char === "\\" && inString) {
+        result += char;
+        isEscaped = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = !inString;
+        result += char;
+        continue;
+      }
+      if (inString) {
+        if (char === "\n") result += "\\n";
+        else if (char === "\r") result += "\\r";
+        else if (char === "	") result += "\\t";
+        else result += char;
+      } else {
+        result += char;
+      }
+    }
+    return result;
+  }
+  salvageTruncatedJson(jsonStr) {
+    let stack = [];
+    let inString = false;
+    let isEscaped = false;
+    for (let i = 0; i < jsonStr.length; i++) {
+      const char = jsonStr[i];
+      if (isEscaped) {
+        isEscaped = false;
+        continue;
+      }
+      if (char === "\\" && inString) {
+        isEscaped = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (!inString) {
+        if (char === "{") stack.push("}");
+        else if (char === "[") stack.push("]");
+        else if (char === "}" || char === "]") {
+          if (stack.length > 0 && stack[stack.length - 1] === char) {
+            stack.pop();
+          }
+        }
+      }
+    }
+    let salvaged = jsonStr;
+    if (inString) {
+      salvaged += '"';
+    }
+    salvaged = salvaged.trim().replace(/,\s*$/, "");
+    while (stack.length > 0) {
+      salvaged += stack.pop();
+    }
+    return salvaged;
   }
   parseJson(jsonString) {
     try {
@@ -8652,7 +8894,17 @@ You are a web project orchestrator. Analyze user request and return execution pl
 
 PROJECT TYPES: ecommerce, portfolio, blog, dashboard, landing-page, saas, or any string
 
-AGENTS: analyst, architect, uiux, data, coder, integration, reviewer
+VALID AGENTS — these 7 exact lowercase names are the ONLY agents that exist in
+this system: analyst, architect, uiux, data, coder, integration, reviewer
+
+CRITICAL RULE: The user's request may mention other role names (e.g. "DevOps
+Agent", "Security Agent", "QA Agent", "Documentation Agent") as part of their
+own proposal or wishlist — these are NOT real agents in this system and do
+NOT exist as executable steps. NEVER put any name other than the 7 listed
+above into the "agents" arrays below. If the user's request implies work like
+deployment, security review, or documentation, that work must be absorbed
+into the closest real agent (usually "architect" for infra/security design,
+"reviewer" for QA-style checks) — do not invent a new agent name for it.
 
 STANDARD PLAN:
 Phase 1 sequential: analyst
@@ -8675,6 +8927,8 @@ Return ONLY this JSON:
 `;
 const ORCHESTRATOR_USER_PROMPT = (userRequest) => `
 User request: "${userRequest}"
+Remember: only use the 7 valid agent names listed in your instructions, even
+if the request above mentions other role names.
 Return execution plan JSON only.
 `;
 
@@ -8737,7 +8991,8 @@ class AnalystAgent extends AgentBase {
     super({
       name: "analyst",
       maxRetries: 3,
-      timeoutMs: 6e4
+      timeoutMs: 12e4
+      // ⚠️ was 60000 — bumped for self-hosted Qwen backend
     }, env);
   }
   async execute(input) {
@@ -8764,25 +9019,41 @@ class AnalystAgent extends AgentBase {
 }
 
 const ARCHITECT_SYSTEM_PROMPT = `
-You are a software architect. Design file structure for web projects.
+You are a software architect. Design the FULL file structure for web projects —
+frontend, backend, AND database — based on what the project actually needs.
+
+Decide the database type yourself based on the requirements' data shape:
+- Use "relational" (PostgreSQL/SQLite-style tables with foreign keys) when data
+  has clear structured relationships (e.g. patients ↔ appointments ↔ doctors).
+- Use "non-relational" (MongoDB-style collections/documents) when data is more
+  flexible/nested/document-shaped, or relationships are shallow.
+Do not default to one blindly — pick whichever genuinely fits this project.
 
 Return ONLY this JSON:
 {
   "fileStructure": [{"path": "string", "type": "file", "purpose": "string"}],
   "components": [{"name": "string", "filePath": "string", "props": ["string"], "dependencies": ["string"]}],
-  "apiRoutes": [],
-  "databaseSchema": []
+  "apiRoutes": [{"method": "GET|POST|PUT|DELETE", "path": "string", "purpose": "string"}],
+  "databaseType": "relational" | "non-relational",
+  "databaseSchema": [
+    {
+      "name": "string (table or collection name)",
+      "fields": [{"name": "string", "type": "string", "required": true, "unique": false}],
+      "relations": [{"field": "string", "relatedTo": "string (another schema name)", "type": "one-to-many|many-to-one|many-to-many"}]
+    }
+  ]
 }
 `;
 const ARCHITECT_USER_PROMPT = (requirements) => `Requirements: ${JSON.stringify(requirements)}
-Return architecture JSON only.`;
+Design the complete file structure including backend API routes and a real database schema appropriate for this project's data. Return architecture JSON only.`;
 
 class ArchitectAgent extends AgentBase {
   constructor(env) {
     super({
       name: "architect",
       maxRetries: 3,
-      timeoutMs: 6e4
+      timeoutMs: 15e4
+      // ⚠️ was 60000 — now also plans DB schema + API routes, needs more time on a self-hosted backend
     }, env);
   }
   async execute(input) {
@@ -8809,15 +9080,18 @@ class ArchitectAgent extends AgentBase {
   }
 }
 
-const CODER_SYSTEM_PROMPT = `
-You are an expert developer. Write complete working code.
+const FRONTEND_CODER_SYSTEM_PROMPT = `
+You are an expert frontend developer. Write complete working frontend code
+for this project based on the architecture you're given.
 
 RULES:
 - No placeholders or TODOs
 - Complete working TypeScript/React code
-- Tailwind CSS for styling
-- Mobile responsive
-- Error handling included
+- Tailwind CSS for styling, mobile responsive, error handling included
+- Follow the given fileStructure paths for frontend files — don't invent a different layout
+- If the architecture includes apiRoutes, call them from the frontend using fetch
+  (e.g. fetch('/api/...')) — you are NOT writing the backend here, only the
+  frontend code that will call it
 
 Return ONLY this JSON:
 {
@@ -8828,20 +9102,48 @@ Return ONLY this JSON:
     "index.html": "complete html",
     "tailwind.config.js": "complete config",
     "vite.config.ts": "complete config"
+    // plus every other frontend file (components, pages, etc.) the architecture calls for
   }
 }
 `;
-const CODER_USER_PROMPT = (requirements, architecture, designDecisions) => `Build this project:
+const FRONTEND_CODER_USER_PROMPT = (requirements, architecture, designDecisions) => `Build the FRONTEND for this project:
 Requirements: ${JSON.stringify(requirements)}
+Architecture (fileStructure/apiRoutes — apiRoutes tell you what endpoints to call, you are not implementing them here): ${JSON.stringify(architecture)}
 Design: ${JSON.stringify(designDecisions)}
-Write ALL files. Return JSON only.`;
+Write ALL frontend files. Return JSON only.`;
+const BACKEND_CODER_SYSTEM_PROMPT = `
+You are an expert backend developer. Write complete working backend and
+database code for this project based on the architecture you're given.
+
+RULES:
+- No placeholders or TODOs
+- If databaseType is "relational": write real SQL (schema.sql or migrations/*.sql)
+  matching the given databaseSchema exactly (tables, columns, types, foreign keys).
+- If databaseType is "non-relational": write real MongoDB-style schema/model files
+  (e.g. Mongoose schemas) matching the given databaseSchema's collections/fields.
+- Implement each apiRoute from the architecture as a real backend route handler
+  file that reads/writes using the schema you just wrote.
+- Follow the given fileStructure paths for backend files — don't invent a different layout
+- You are NOT writing the frontend here, only backend route handlers and database files
+
+Return ONLY this JSON:
+{
+  "files": {
+    // every backend route handler file and every database schema/migration
+    // file the architecture calls for — nothing else
+  }
+}
+`;
+const BACKEND_CODER_USER_PROMPT = (architecture) => `Build the BACKEND and DATABASE for this project:
+Architecture (apiRoutes/databaseType/databaseSchema — implement these exactly): ${JSON.stringify(architecture)}
+Write ALL backend route files and database schema files described in the architecture. Return JSON only.`;
 
 class CoderAgent extends AgentBase {
   constructor(env) {
     super({
       name: "coder",
       maxRetries: 2,
-      timeoutMs: 12e4
+      timeoutMs: 24e4
     }, env);
   }
   async execute(input) {
@@ -8849,28 +9151,44 @@ class CoderAgent extends AgentBase {
     if (!requirements || !architecture) {
       throw new Error("Coder needs requirements and architecture first");
     }
-    const userMessage = CODER_USER_PROMPT(
-      requirements,
-      architecture,
-      designDecisions
-    );
-    const jsonString = await this.callLLM(
-      CODER_SYSTEM_PROMPT,
-      userMessage,
+    console.log("[Coder] Generating frontend...");
+    const frontendJson = await this.callLLM(
+      FRONTEND_CODER_SYSTEM_PROMPT,
+      FRONTEND_CODER_USER_PROMPT(requirements, architecture, designDecisions),
       true
     );
-    const result = this.parseJson(jsonString);
-    if (!result.files || Object.keys(result.files).length === 0) {
-      throw new Error("Coder returned no files");
+    const frontendResult = this.parseJson(frontendJson);
+    if (!frontendResult.files || Object.keys(frontendResult.files).length === 0) {
+      throw new Error("Coder returned no frontend files");
     }
-    const dataFiles = input.context?.generatedCode || {};
-    const integrationFiles = input.context?.integrationFiles || {};
+    let backendFiles = {};
+    const needsBackend = architecture.apiRoutes && architecture.apiRoutes.length > 0 || architecture.databaseSchema && architecture.databaseSchema.length > 0;
+    if (needsBackend) {
+      console.log("[Coder] Generating backend + database...");
+      try {
+        const backendJson = await this.callLLM(
+          BACKEND_CODER_SYSTEM_PROMPT,
+          BACKEND_CODER_USER_PROMPT(architecture),
+          true
+        );
+        const backendResult = this.parseJson(backendJson);
+        backendFiles = backendResult.files || {};
+        console.log(`[Coder] Backend files generated: ${Object.keys(backendFiles).length}`);
+      } catch (error) {
+        console.error("[Coder] Backend generation failed, continuing with frontend only:", error.message);
+      }
+    } else {
+      console.log("[Coder] Architecture has no apiRoutes/databaseSchema — skipping backend call");
+    }
+    const dataFiles = input.context?.dataFiles?.dataFiles || {};
+    const integrationFiles = input.context?.integrationData?.files || {};
     const allFiles = {
-      ...result.files,
+      ...frontendResult.files,
+      ...backendFiles,
       ...dataFiles,
       ...integrationFiles
     };
-    console.log(`[Coder] Files generated: ${Object.keys(allFiles).length}`);
+    console.log(`[Coder] Total files generated: ${Object.keys(allFiles).length}`);
     Object.keys(allFiles).forEach((f) => console.log(`  → ${f}`));
     return {
       success: true,
@@ -8899,7 +9217,8 @@ class ReviewerAgent extends AgentBase {
     super({
       name: "reviewer",
       maxRetries: 2,
-      timeoutMs: 6e4
+      timeoutMs: 12e4
+      // ⚠️ was 60000 — bumped for self-hosted Qwen backend
     }, env);
   }
   async execute(input) {
@@ -8951,7 +9270,8 @@ class UIUXAgent extends AgentBase {
     super({
       name: "uiux",
       maxRetries: 3,
-      timeoutMs: 6e4
+      timeoutMs: 12e4
+      // ⚠️ was 60000 — bumped for self-hosted Qwen backend
     }, env);
   }
   async execute(input) {
@@ -9021,7 +9341,8 @@ class DataAgent extends AgentBase {
     super({
       name: "data",
       maxRetries: 3,
-      timeoutMs: 6e4
+      timeoutMs: 12e4
+      // ⚠️ was 60000 — bumped for self-hosted Qwen backend
     }, env);
   }
   async execute(input) {
@@ -9104,7 +9425,8 @@ class IntegrationAgent extends AgentBase {
     super({
       name: "integration",
       maxRetries: 3,
-      timeoutMs: 6e4
+      timeoutMs: 12e4
+      // ⚠️ was 60000 — bumped for self-hosted Qwen backend
     }, env);
   }
   async execute(input) {
@@ -9143,6 +9465,15 @@ Generate complete integration code for all required services.
   }
 }
 
+const KNOWN_AGENTS = [
+  "analyst",
+  "architect",
+  "coder",
+  "reviewer",
+  "uiux",
+  "data",
+  "integration"
+];
 function getAgent(name, env) {
   switch (name) {
     case "analyst":
@@ -9165,34 +9496,61 @@ function getAgent(name, env) {
 }
 async function runAgentPlan(plan, onProgress) {
   let context = {};
+  const failures = [];
   await updateRunStatus(plan.runId, "running", void 0, plan.env);
   for (const phase of plan.phases) {
     console.log(`
 🚀 Phase: ${phase.phaseName} [${phase.executionType}]`);
+    const validAgents = phase.agents.filter((a) => KNOWN_AGENTS.includes(a));
+    const droppedAgents = phase.agents.filter((a) => !KNOWN_AGENTS.includes(a));
+    if (droppedAgents.length > 0) {
+      console.warn(`⚠️ Skipping unknown agent(s) in plan: ${droppedAgents.join(", ")}`);
+    }
     if (phase.executionType === "sequential") {
-      for (const agentName of phase.agents) {
-        context = await runSingleAgent(
+      for (const agentName of validAgents) {
+        const result = await runSingleAgent(
           agentName,
           plan,
           context,
           onProgress
         );
+        context = result.context;
+        if (result.failure) {
+          failures.push(result.failure);
+          if (["analyst", "architect", "coder"].includes(agentName)) {
+            console.error(`[AgentRunner] Critical agent '${agentName}' failed: ${result.failure.error}. Aborting plan execution.`);
+            await updateRunStatus(plan.runId, "failed", void 0, plan.env);
+            return { context, failures };
+          }
+        }
       }
     } else {
       const results = await Promise.allSettled(
-        phase.agents.map(
+        validAgents.map(
           (agentName) => runSingleAgent(agentName, plan, context, onProgress)
         )
       );
+      let criticalFailed = false;
       for (const result of results) {
         if (result.status === "fulfilled") {
-          Object.assign(context, result.value);
+          Object.assign(context, result.value.context);
+          if (result.value.failure) {
+            failures.push(result.value.failure);
+            if (["analyst", "architect", "coder"].includes(result.value.failure.agentName)) {
+              criticalFailed = true;
+            }
+          }
         }
+      }
+      if (criticalFailed) {
+        console.error(`[AgentRunner] Critical agent failed in parallel phase. Aborting plan execution.`);
+        await updateRunStatus(plan.runId, "failed", void 0, plan.env);
+        return { context, failures };
       }
     }
   }
   await updateRunStatus(plan.runId, "done", void 0, plan.env);
-  return context;
+  return { context, failures };
 }
 async function runSingleAgent(agentName, plan, context, onProgress) {
   const agent = getAgent(agentName, plan.env);
@@ -9219,7 +9577,7 @@ async function runSingleAgent(agentName, plan, context, onProgress) {
       message: getDoneMessage(agentName),
       data: output.data
     });
-    return updatedContext;
+    return { context: updatedContext };
   } else {
     await saveAgentTask(plan.runId, agentName, "failed", input, null, output.error, plan.env);
     onProgress?.({
@@ -9228,7 +9586,7 @@ async function runSingleAgent(agentName, plan, context, onProgress) {
       status: "failed",
       message: `${agentName} failed: ${output.error}`
     });
-    return context;
+    return { context, failure: { agentName, error: output.error || "Unknown error" } };
   }
 }
 function updateContext(context, agentName, data) {
@@ -9248,6 +9606,12 @@ function updateContext(context, agentName, data) {
       break;
     case "reviewer":
       updated.reviewFeedback = data;
+      break;
+    case "data":
+      updated.dataFiles = data;
+      break;
+    case "integration":
+      updated.integrationData = data;
       break;
   }
   return updated;
@@ -9284,7 +9648,12 @@ class Orchestrator extends AgentBase {
     super({
       name: "orchestrator",
       maxRetries: 3,
-      timeoutMs: 3e4
+      // ⚠️ FIX: was 30000 (30s) — fine for fast cloud APIs (OpenAI/Groq) but far
+      // too short for a self-hosted, small-GPU Qwen backend, especially with
+      // long user prompts. Every attempt was timing out before Qwen could even
+      // finish generating, so planning (and the whole orchestrator run) always
+      // failed after 3 wasted attempts.
+      timeoutMs: 12e4
     }, env);
   }
   // Main entry point — called from API route
@@ -9307,7 +9676,12 @@ class Orchestrator extends AgentBase {
         phases: plan.phases,
         env: this.env
       };
-      const context = await runAgentPlan(agentPlan, onProgress);
+      const { context, failures } = await runAgentPlan(agentPlan, onProgress);
+      if (failures.length > 0) {
+        console.warn(`
+⚠️ ${failures.length} agent(s) failed:`);
+        failures.forEach((f) => console.warn(`  - ${f.agentName}: ${f.error}`));
+      }
       const allFiles = {};
       if (context.generatedCode) {
         Object.assign(allFiles, context.generatedCode);
@@ -9332,10 +9706,13 @@ class Orchestrator extends AgentBase {
       await updateRunStatus(runId, "done", void 0, this.env);
       console.log(`
 ✅ Orchestrator done — ${Object.keys(allFiles).length} files generated`);
+      const firstCriticalFailure = failures.find((f) => ["analyst", "architect", "coder"].includes(f.agentName));
       return {
-        success: true,
+        success: !firstCriticalFailure,
         files: allFiles,
-        runId
+        runId,
+        ...failures.length > 0 ? { warnings: failures } : {},
+        ...firstCriticalFailure ? { error: `${firstCriticalFailure.agentName.toUpperCase()} agent failed: ${firstCriticalFailure.error}` } : {}
       };
     } catch (error) {
       console.error("\n❌ Orchestrator failed:", error.message);
@@ -9594,8 +9971,15 @@ async function selectContext(props) {
     }
     return message;
   });
+  const envAny = serverEnv;
+  if (currentProvider === DEFAULT_PROVIDER.name && envAny?.PROVIDER_NAME) {
+    currentProvider = envAny.PROVIDER_NAME;
+  }
+  if (currentModel === DEFAULT_MODEL && envAny?.DEFAULT_MODEL) {
+    currentModel = envAny.DEFAULT_MODEL;
+  }
   const provider = PROVIDER_LIST.find((p) => p.name === currentProvider) || DEFAULT_PROVIDER;
-  const staticModels = LLMManager.getInstance().getStaticModelListFromProvider(provider);
+  const staticModels = provider.staticModels || [];
   let modelDetails = staticModels.find((m) => m.name === currentModel);
   if (!modelDetails) {
     const modelsList = [
@@ -9767,8 +10151,15 @@ async function createSummary(props) {
     }
     return message;
   });
+  const envAny = serverEnv;
+  if (currentProvider === DEFAULT_PROVIDER.name && envAny?.PROVIDER_NAME) {
+    currentProvider = envAny.PROVIDER_NAME;
+  }
+  if (currentModel === DEFAULT_MODEL && envAny?.DEFAULT_MODEL) {
+    currentModel = envAny.DEFAULT_MODEL;
+  }
   const provider = PROVIDER_LIST.find((p) => p.name === currentProvider) || DEFAULT_PROVIDER;
-  const staticModels = LLMManager.getInstance().getStaticModelListFromProvider(provider);
+  const staticModels = provider.staticModels || [];
   let modelDetails = staticModels.find((m) => m.name === currentModel);
   if (!modelDetails) {
     const modelsList = [
@@ -12125,7 +12516,7 @@ async function newShellProcess(webcontainer, terminal) {
         }
         terminal.write(data);
         try {
-          import('./debugLogger-CWBzB6Jh.js').then(({ captureTerminalLog }) => {
+          import('./debugLogger-0GOE54E8.js').then(({ captureTerminalLog }) => {
             const cleanData = data.replace(/\x1b\[[0-9;]*[mG]/g, "").trim();
             if (cleanData) {
               captureTerminalLog(cleanData, "output");
@@ -12141,7 +12532,7 @@ async function newShellProcess(webcontainer, terminal) {
     if (isInteractive) {
       input.write(data);
       try {
-        import('./debugLogger-CWBzB6Jh.js').then(({ captureTerminalLog }) => {
+        import('./debugLogger-0GOE54E8.js').then(({ captureTerminalLog }) => {
           const cleanData = data.replace(/\x1b\[[0-9;]*[A-Z]/g, "").trim();
           if (cleanData && cleanData !== "\r" && cleanData !== "\n") {
             captureTerminalLog(cleanData, "input");
@@ -15206,7 +15597,7 @@ const route42 = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({
   meta
 }, Symbol.toStringTag, { value: 'Module' }));
 
-const serverManifest = {'entry':{'module':'/assets/entry.client-Cy4_-gvi.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes':{'root':{'id':'root','parentId':undefined,'path':'','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/root-DG4XXkjf.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-DSbDhvEZ.js'],'css':['/assets/root-CXedhVvl.css']},'routes/api.configured-providers':{'id':'routes/api.configured-providers','parentId':'root','path':'api/configured-providers','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.configured-providers-l0sNRNKZ.js','imports':[],'css':[]},'routes/webcontainer.connect.$id':{'id':'routes/webcontainer.connect.$id','parentId':'root','path':'webcontainer/connect/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/webcontainer.connect._id-l0sNRNKZ.js','imports':[],'css':[]},'routes/webcontainer.preview.$id':{'id':'routes/webcontainer.preview.$id','parentId':'root','path':'webcontainer/preview/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/webcontainer.preview._id-Brb4CmdH.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.system.diagnostics':{'id':'routes/api.system.diagnostics','parentId':'root','path':'api/system/diagnostics','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.diagnostics-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.mcp-update-config':{'id':'routes/api.mcp-update-config','parentId':'root','path':'api/mcp-update-config','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.mcp-update-config-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.models.$provider':{'id':'routes/api.models.$provider','parentId':'routes/api.models','path':':provider','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.models._provider-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.system.disk-info':{'id':'routes/api.system.disk-info','parentId':'root','path':'api/system/disk-info','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.disk-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.export-api-keys':{'id':'routes/api.export-api-keys','parentId':'root','path':'api/export-api-keys','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.export-api-keys-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-branches':{'id':'routes/api.github-branches','parentId':'root','path':'api/github-branches','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-branches-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-template':{'id':'routes/api.github-template','parentId':'root','path':'api/github-template','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-template-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.gitlab-branches':{'id':'routes/api.gitlab-branches','parentId':'root','path':'api/gitlab-branches','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.gitlab-branches-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.gitlab-projects':{'id':'routes/api.gitlab-projects','parentId':'root','path':'api/gitlab-projects','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.gitlab-projects-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.system.git-info':{'id':'routes/api.system.git-info','parentId':'root','path':'api/system/git-info','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.git-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.netlify-deploy':{'id':'routes/api.netlify-deploy','parentId':'root','path':'api/netlify-deploy','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.netlify-deploy-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.check-env-key':{'id':'routes/api.check-env-key','parentId':'root','path':'api/check-env-key','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.check-env-key-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.vercel-deploy':{'id':'routes/api.vercel-deploy','parentId':'root','path':'api/vercel-deploy','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.vercel-deploy-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.agent.status':{'id':'routes/api.agent.status','parentId':'routes/api.agent','path':'status','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.agent.status-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-stats':{'id':'routes/api.github-stats','parentId':'root','path':'api/github-stats','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-stats-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.netlify-user':{'id':'routes/api.netlify-user','parentId':'root','path':'api/netlify-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.netlify-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.git-proxy.$':{'id':'routes/api.git-proxy.$','parentId':'root','path':'api/git-proxy/*','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.git-proxy._-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-user':{'id':'routes/api.github-user','parentId':'root','path':'api/github-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.vercel-user':{'id':'routes/api.vercel-user','parentId':'root','path':'api/vercel-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.vercel-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.bug-report':{'id':'routes/api.bug-report','parentId':'root','path':'api/bug-report','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.bug-report-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.web-search':{'id':'routes/api.web-search','parentId':'root','path':'api/web-search','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.web-search-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.mcp-check':{'id':'routes/api.mcp-check','parentId':'root','path':'api/mcp-check','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.mcp-check-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.enhancer':{'id':'routes/api.enhancer','parentId':'root','path':'api/enhancer','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.enhancer-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.git-info':{'id':'routes/api.git-info','parentId':'root','path':'api/git-info','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.git-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.projects':{'id':'routes/api.projects','parentId':'root','path':'api/projects','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.projects-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.llmcall':{'id':'routes/api.llmcall','parentId':'root','path':'api/llmcall','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.llmcall-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.logout':{'id':'routes/auth.logout','parentId':'root','path':'auth/logout','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.logout-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.signup':{'id':'routes/auth.signup','parentId':'root','path':'auth/signup','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.signup-jo4f5nVm.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.health':{'id':'routes/api.health','parentId':'root','path':'api/health','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.health-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.models':{'id':'routes/api.models','parentId':'root','path':'api/models','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.models-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.social':{'id':'routes/api.social','parentId':'root','path':'api/social','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.social-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.update':{'id':'routes/api.update','parentId':'root','path':'api/update','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.update-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.login':{'id':'routes/auth.login','parentId':'root','path':'auth/login','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.login-BoH3eejp.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.agent':{'id':'routes/api.agent','parentId':'root','path':'api/agent','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.agent-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.chat':{'id':'routes/api.chat','parentId':'root','path':'api/chat','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.chat-l0sNRNKZ.js','imports':[],'css':[]},'routes/chat.$id':{'id':'routes/chat.$id','parentId':'root','path':'chat/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/chat._id-Cla4apXv.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-DSbDhvEZ.js','/assets/index-r5QYNQXf.js','/assets/mobile-CY9VsZGi.js'],'css':['/assets/index-BJyyulAC.css']},'routes/_index':{'id':'routes/_index','parentId':'root','path':undefined,'index':true,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/_index-BAwwMpXG.js','imports':['/assets/chat._id-Cla4apXv.js','/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-DSbDhvEZ.js','/assets/index-r5QYNQXf.js','/assets/mobile-CY9VsZGi.js'],'css':['/assets/index-BJyyulAC.css']},'routes/guest':{'id':'routes/guest','parentId':'root','path':'guest','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/guest-DetG6s7J.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-DSbDhvEZ.js','/assets/index-r5QYNQXf.js','/assets/mobile-CY9VsZGi.js'],'css':['/assets/index-BJyyulAC.css']},'routes/git':{'id':'routes/git','parentId':'root','path':'git','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/git-CrmRWifF.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-DSbDhvEZ.js','/assets/index-r5QYNQXf.js','/assets/mobile-CY9VsZGi.js'],'css':['/assets/index-BJyyulAC.css']}},'url':'/assets/manifest-c3b749a7.js','version':'c3b749a7'};
+const serverManifest = {'entry':{'module':'/assets/entry.client-Cy4_-gvi.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes':{'root':{'id':'root','parentId':undefined,'path':'','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/root-DGJPxK8W.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-BKcc9JcY.js'],'css':['/assets/root-LKFiIqaT.css']},'routes/api.configured-providers':{'id':'routes/api.configured-providers','parentId':'root','path':'api/configured-providers','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.configured-providers-l0sNRNKZ.js','imports':[],'css':[]},'routes/webcontainer.connect.$id':{'id':'routes/webcontainer.connect.$id','parentId':'root','path':'webcontainer/connect/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/webcontainer.connect._id-l0sNRNKZ.js','imports':[],'css':[]},'routes/webcontainer.preview.$id':{'id':'routes/webcontainer.preview.$id','parentId':'root','path':'webcontainer/preview/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/webcontainer.preview._id-Brb4CmdH.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.system.diagnostics':{'id':'routes/api.system.diagnostics','parentId':'root','path':'api/system/diagnostics','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.diagnostics-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.mcp-update-config':{'id':'routes/api.mcp-update-config','parentId':'root','path':'api/mcp-update-config','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.mcp-update-config-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.models.$provider':{'id':'routes/api.models.$provider','parentId':'routes/api.models','path':':provider','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.models._provider-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.system.disk-info':{'id':'routes/api.system.disk-info','parentId':'root','path':'api/system/disk-info','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.disk-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.export-api-keys':{'id':'routes/api.export-api-keys','parentId':'root','path':'api/export-api-keys','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.export-api-keys-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-branches':{'id':'routes/api.github-branches','parentId':'root','path':'api/github-branches','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-branches-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-template':{'id':'routes/api.github-template','parentId':'root','path':'api/github-template','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-template-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.gitlab-branches':{'id':'routes/api.gitlab-branches','parentId':'root','path':'api/gitlab-branches','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.gitlab-branches-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.gitlab-projects':{'id':'routes/api.gitlab-projects','parentId':'root','path':'api/gitlab-projects','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.gitlab-projects-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.system.git-info':{'id':'routes/api.system.git-info','parentId':'root','path':'api/system/git-info','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.git-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.netlify-deploy':{'id':'routes/api.netlify-deploy','parentId':'root','path':'api/netlify-deploy','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.netlify-deploy-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.check-env-key':{'id':'routes/api.check-env-key','parentId':'root','path':'api/check-env-key','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.check-env-key-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.vercel-deploy':{'id':'routes/api.vercel-deploy','parentId':'root','path':'api/vercel-deploy','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.vercel-deploy-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.agent.status':{'id':'routes/api.agent.status','parentId':'routes/api.agent','path':'status','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.agent.status-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-stats':{'id':'routes/api.github-stats','parentId':'root','path':'api/github-stats','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-stats-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.netlify-user':{'id':'routes/api.netlify-user','parentId':'root','path':'api/netlify-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.netlify-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.git-proxy.$':{'id':'routes/api.git-proxy.$','parentId':'root','path':'api/git-proxy/*','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.git-proxy._-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-user':{'id':'routes/api.github-user','parentId':'root','path':'api/github-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.vercel-user':{'id':'routes/api.vercel-user','parentId':'root','path':'api/vercel-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.vercel-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.bug-report':{'id':'routes/api.bug-report','parentId':'root','path':'api/bug-report','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.bug-report-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.web-search':{'id':'routes/api.web-search','parentId':'root','path':'api/web-search','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.web-search-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.mcp-check':{'id':'routes/api.mcp-check','parentId':'root','path':'api/mcp-check','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.mcp-check-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.enhancer':{'id':'routes/api.enhancer','parentId':'root','path':'api/enhancer','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.enhancer-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.git-info':{'id':'routes/api.git-info','parentId':'root','path':'api/git-info','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.git-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.projects':{'id':'routes/api.projects','parentId':'root','path':'api/projects','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.projects-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.llmcall':{'id':'routes/api.llmcall','parentId':'root','path':'api/llmcall','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.llmcall-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.logout':{'id':'routes/auth.logout','parentId':'root','path':'auth/logout','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.logout-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.signup':{'id':'routes/auth.signup','parentId':'root','path':'auth/signup','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.signup-jo4f5nVm.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.health':{'id':'routes/api.health','parentId':'root','path':'api/health','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.health-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.models':{'id':'routes/api.models','parentId':'root','path':'api/models','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.models-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.social':{'id':'routes/api.social','parentId':'root','path':'api/social','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.social-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.update':{'id':'routes/api.update','parentId':'root','path':'api/update','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.update-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.login':{'id':'routes/auth.login','parentId':'root','path':'auth/login','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.login-BoH3eejp.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.agent':{'id':'routes/api.agent','parentId':'root','path':'api/agent','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.agent-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.chat':{'id':'routes/api.chat','parentId':'root','path':'api/chat','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.chat-l0sNRNKZ.js','imports':[],'css':[]},'routes/chat.$id':{'id':'routes/chat.$id','parentId':'root','path':'chat/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/chat._id-DFif6zuO.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-BKcc9JcY.js','/assets/index-DECHEopG.js','/assets/mobile-B3eqhtUb.js'],'css':['/assets/index-BJyyulAC.css']},'routes/_index':{'id':'routes/_index','parentId':'root','path':undefined,'index':true,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/_index-DHvvA25g.js','imports':['/assets/chat._id-DFif6zuO.js','/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-BKcc9JcY.js','/assets/index-DECHEopG.js','/assets/mobile-B3eqhtUb.js'],'css':['/assets/index-BJyyulAC.css']},'routes/guest':{'id':'routes/guest','parentId':'root','path':'guest','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/guest-Dzq0QX01.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-BKcc9JcY.js','/assets/index-DECHEopG.js','/assets/mobile-B3eqhtUb.js'],'css':['/assets/index-BJyyulAC.css']},'routes/git':{'id':'routes/git','parentId':'root','path':'git','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/git-B6aP3MXu.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-BKcc9JcY.js','/assets/index-DECHEopG.js','/assets/mobile-B3eqhtUb.js'],'css':['/assets/index-BJyyulAC.css']}},'url':'/assets/manifest-b2739c7d.js','version':'b2739c7d'};
 
 /**
        * `mode` is only relevant for the old Remix compiler but
