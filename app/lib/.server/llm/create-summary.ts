@@ -39,6 +39,22 @@ export async function createSummary(props: {
     return message;
   });
 
+  // extractPropertiesFromMessage() only finds a provider/model when the
+  // frontend embeds a [Model: ...]/[Provider: ...] tag in the message text.
+  // Since this app is driven by .env (PROVIDER_NAME/DEFAULT_MODEL), not
+  // per-message tags, extraction always falls through to the hardcoded
+  // DEFAULT_MODEL/DEFAULT_PROVIDER.name constants — which are computed once
+  // at module load, before Cloudflare's per-request env is available, so
+  // they resolve to plain "OpenAI". When that fallback happened, prefer the
+  // real per-request env values instead.
+  const envAny = serverEnv as any;
+  if (currentProvider === DEFAULT_PROVIDER.name && envAny?.PROVIDER_NAME) {
+    currentProvider = envAny.PROVIDER_NAME;
+  }
+  if (currentModel === DEFAULT_MODEL && envAny?.DEFAULT_MODEL) {
+    currentModel = envAny.DEFAULT_MODEL;
+  }
+
   const provider = PROVIDER_LIST.find((p) => p.name === currentProvider) || DEFAULT_PROVIDER;
   const staticModels = provider.staticModels || [];
   let modelDetails = staticModels.find((m) => m.name === currentModel);

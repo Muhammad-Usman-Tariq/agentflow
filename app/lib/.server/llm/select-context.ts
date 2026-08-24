@@ -47,6 +47,18 @@ export async function selectContext(props: {
     return message;
   });
 
+  // See create-summary.ts for full explanation: extraction falls back to the
+  // hardcoded DEFAULT_MODEL/DEFAULT_PROVIDER.name when no per-message
+  // [Model:]/[Provider:] tag is embedded, which doesn't reflect our .env
+  // override. Prefer the real per-request env values in that case.
+  const envAny = serverEnv as any;
+  if (currentProvider === DEFAULT_PROVIDER.name && envAny?.PROVIDER_NAME) {
+    currentProvider = envAny.PROVIDER_NAME;
+  }
+  if (currentModel === DEFAULT_MODEL && envAny?.DEFAULT_MODEL) {
+    currentModel = envAny.DEFAULT_MODEL;
+  }
+
   const provider = PROVIDER_LIST.find((p) => p.name === currentProvider) || DEFAULT_PROVIDER;
   const staticModels = provider.staticModels || [];
   let modelDetails = staticModels.find((m) => m.name === currentModel);
