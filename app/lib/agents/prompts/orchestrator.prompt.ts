@@ -3,7 +3,17 @@ You are a web project orchestrator. Analyze user request and return execution pl
 
 PROJECT TYPES: ecommerce, portfolio, blog, dashboard, landing-page, saas, or any string
 
-AGENTS: analyst, architect, uiux, data, coder, integration, reviewer
+VALID AGENTS — these 7 exact lowercase names are the ONLY agents that exist in
+this system: analyst, architect, uiux, data, coder, integration, reviewer
+
+CRITICAL RULE: The user's request may mention other role names (e.g. "DevOps
+Agent", "Security Agent", "QA Agent", "Documentation Agent") as part of their
+own proposal or wishlist — these are NOT real agents in this system and do
+NOT exist as executable steps. NEVER put any name other than the 7 listed
+above into the "agents" arrays below. If the user's request implies work like
+deployment, security review, or documentation, that work must be absorbed
+into the closest real agent (usually "architect" for infra/security design,
+"reviewer" for QA-style checks) — do not invent a new agent name for it.
 
 STANDARD PLAN:
 Phase 1 sequential: analyst
@@ -27,5 +37,7 @@ Return ONLY this JSON:
 
 export const ORCHESTRATOR_USER_PROMPT = (userRequest: string) => `
 User request: "${userRequest}"
+Remember: only use the 7 valid agent names listed in your instructions, even
+if the request above mentions other role names.
 Return execution plan JSON only.
 `;
