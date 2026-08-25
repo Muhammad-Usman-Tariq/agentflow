@@ -8,7 +8,7 @@ export class ArchitectAgent extends AgentBase {
   super({
     name: 'architect',
     maxRetries: 3,
-    timeoutMs: 150000, // ⚠️ was 60000 — now also plans DB schema + API routes, needs more time on a self-hosted backend
+    timeoutMs: 240000, // ⚠️ was 150000 — 150s was cutting it too close (generation was completing successfully, just after the timeout had already fired); now paired with AbortController so a genuine timeout properly cancels instead of leaving the request running
   }, env);
 }
 

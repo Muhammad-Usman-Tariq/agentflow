@@ -118,14 +118,14 @@ export class Orchestrator extends AgentBase {
       // in the API response, so there was no way to tell the run had
       // actually produced no working app. Now a Coder failure is reported
       // as a genuine failure, with its real error message attached.
-      const firstCriticalFailure = failures.find(f => ['analyst', 'architect', 'coder'].includes(f.agentName));
+      const coderFailed = failures.some(f => f.agentName === 'coder');
 
       return {
-        success: !firstCriticalFailure,
+        success: !coderFailed,
         files: allFiles,
         runId,
         ...(failures.length > 0 ? { warnings: failures } : {}),
-        ...(firstCriticalFailure ? { error: `${firstCriticalFailure.agentName.toUpperCase()} agent failed: ${firstCriticalFailure.error}` } : {}),
+        ...(coderFailed ? { error: `Coder agent failed: ${failures.find(f => f.agentName === 'coder')?.error}` } : {}),
       } as any;
 
     } catch (error: any) {
@@ -148,6 +148,33 @@ export class Orchestrator extends AgentBase {
     );
 
     const plan = this.parseJson<OrchestratorPlan>(jsonString);
+
+    // ⚠️ FIX: on a long/complex user request, the planning LLM sometimes
+    // invents a completely different phase structure and skips one or more
+    // of the core agents (analyst/architect/coder) entirely, or places them
+    // out of order. Missing analyst/architect leaves Coder with no
+    // requirements/architecture (it fails loudly). Missing 'coder' itself
+    // is worse and silent — nothing technically fails, but no real
+    // application code ever gets generated. Rather than trying to detect
+    // and patch every possible ordering mistake, always hardcode the
+    // backbone order (analyst -> architect -> coder, one agent per
+    // sequential phase) regardless of what the model proposed for those
+    // three specifically, then append the model's own choices for
+    // supplementary agents (uiux/reviewer/data/integration), preserving
+    // their relative order.
+    const CORE_AGENTS = ['analyst', 'architect', 'coder'];
+    const modelPhases = plan.phases || [];
+
+    const supplementaryPhases = modelPhases
+      .map(p => ({ ...p, agents: p.agents.filter((a: string) => !CORE_AGENTS.includes(a)) }))
+      .filter(p => p.agents.length > 0);
+
+    plan.phases = [
+      { phaseName: 'Analysis', executionType: 'sequential' as const, agents: ['analyst'] },
+      { phaseName: 'Planning', executionType: 'sequential' as const, agents: ['architect'] },
+      { phaseName: 'Development', executionType: 'sequential' as const, agents: ['coder'] },
+      ...supplementaryPhases,
+    ];
 
     return {
       success: true,

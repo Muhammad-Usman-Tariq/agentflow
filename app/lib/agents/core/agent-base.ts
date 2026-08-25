@@ -205,11 +205,32 @@ export abstract class AgentBase implements IAgent {
       isStreamingRequest = true;
     }
 
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(bodyPayload),
-    });
+    // ⚠️ FIX: previously, when AgentBase.run()'s outer timeout fired, we
+    // simply stopped WAITING for this fetch — we never actually cancelled
+    // it. The request kept running on the (single, shared) Colab GPU in
+    // the background, and the very next retry fired a BRAND NEW request on
+    // top of it. Each retry stacked more concurrent load onto the same
+    // GPU, making every subsequent attempt slower than the last — a
+    // self-worsening cycle that guaranteed all 3 retries would eventually
+    // time out, even though the model was genuinely completing the work
+    // each time (just slightly too slowly). An AbortController tied to the
+    // same timeout budget ensures a timed-out request is actually
+    // cancelled, freeing the GPU for the next attempt instead of
+    // competing with it.
+    const abortController = new AbortController();
+    const abortTimer = setTimeout(() => abortController.abort(), Math.max(this.config.timeoutMs - 1000, 1000));
+
+    let response: Response;
+    try {
+      response = await fetch(apiUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(bodyPayload),
+        signal: abortController.signal,
+      });
+    } finally {
+      clearTimeout(abortTimer);
+    }
 
     if (!response.ok) {
       const errText = await response.text();
