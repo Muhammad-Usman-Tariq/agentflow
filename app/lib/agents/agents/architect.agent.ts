@@ -25,6 +25,65 @@ function computeDynamicTokens(requirements: any): number {
   return Math.min(MAX_ARCHITECT_CEILING, estimated);
 }
 
+function synthesizeBackendFiles(
+  apiRoutes: any[],
+  databaseType: string,
+  databaseSchema: any[]
+): Array<{ path: string; type: string; purpose: string }> {
+  const backendEntries: Array<{ path: string; type: string; purpose: string }> = [];
+
+  // 1. Group apiRoutes by resource name
+  if (Array.isArray(apiRoutes) && apiRoutes.length > 0) {
+    const resources = new Set<string>();
+
+    for (const route of apiRoutes) {
+      const rawPath = route.path || '';
+      const cleaned = rawPath.replace(/^\/+api\/+/, '').replace(/^\/+/, '');
+      const segments = cleaned.split('/').filter(Boolean);
+      const resourceSegment = segments[0] ? segments[0].replace(/^:[a-zA-Z0-9_-]+$/, '') : '';
+
+      const resourceName =
+        resourceSegment && !resourceSegment.startsWith(':') ? resourceSegment.toLowerCase() : 'general';
+
+      resources.add(resourceName);
+    }
+
+    for (const resource of resources) {
+      backendEntries.push({
+        path: `server/routes/${resource}.js`,
+        type: 'file',
+        purpose: `Express API route handlers for ${resource}`,
+      });
+    }
+
+    // Always add server entry point when API routes exist
+    backendEntries.push({
+      path: 'server/index.js',
+      type: 'file',
+      purpose: 'Express server entry point and API route mounting',
+    });
+  }
+
+  // 2. Database schema / models file
+  if (Array.isArray(databaseSchema) && databaseSchema.length > 0) {
+    if (databaseType === 'non-relational') {
+      backendEntries.push({
+        path: 'server/database/models.ts',
+        type: 'file',
+        purpose: 'MongoDB/NoSQL document model definitions',
+      });
+    } else {
+      backendEntries.push({
+        path: 'server/database/schema.sql',
+        type: 'file',
+        purpose: 'Relational database schema DDL (tables, columns, foreign keys)',
+      });
+    }
+  }
+
+  return backendEntries;
+}
+
 export class ArchitectAgent extends AgentBase {
   constructor(env?: Record<string, string>) {
     super(
@@ -88,12 +147,33 @@ export class ArchitectAgent extends AgentBase {
       databaseSchema: integrationData.databaseSchema || [],
     };
 
+    // Synthesize backend fileStructure entries from apiRoutes and databaseSchema
+    const derivedBackendFiles = synthesizeBackendFiles(
+      architecture.apiRoutes,
+      architecture.databaseType,
+      architecture.databaseSchema
+    );
+
+    const existingPaths = new Set((architecture.fileStructure || []).map((f: any) => f.path));
+    const addedBackendEntries: Array<{ path: string; type: string; purpose: string }> = [];
+
+    for (const entry of derivedBackendFiles) {
+      if (!existingPaths.has(entry.path)) {
+        architecture.fileStructure.push(entry);
+        existingPaths.add(entry.path);
+        addedBackendEntries.push(entry);
+      }
+    }
+
     if (!architecture.fileStructure || architecture.fileStructure.length === 0 || !architecture.components) {
       throw new Error('Architect returned incomplete architecture');
     }
 
+    const frontendCount = architecture.fileStructure.length - addedBackendEntries.length;
     console.log(`[Architect] ✅ Merged architecture planned:`);
-    console.log(`[Architect] Files planned: ${architecture.fileStructure.length}`);
+    console.log(
+      `[Architect] Files planned: ${architecture.fileStructure.length} (${frontendCount} frontend + ${addedBackendEntries.length} backend, derived from apiRoutes/databaseSchema)`
+    );
     console.log(`[Architect] Components: ${architecture.components.length}`);
     console.log(`[Architect] API Routes: ${architecture.apiRoutes.length}`);
     console.log(`[Architect] DB Type: ${architecture.databaseType}, Schemas: ${architecture.databaseSchema.length}`);

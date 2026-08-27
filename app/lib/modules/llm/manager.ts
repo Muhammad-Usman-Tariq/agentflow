@@ -31,6 +31,10 @@ export class LLMManager {
     return LLMManager._instance;
   }
 
+  get env(): Record<string, string> {
+    return this._env;
+  }
+
   private _registerProviders() {
     const allProviders = [
       new AnthropicProvider(),
