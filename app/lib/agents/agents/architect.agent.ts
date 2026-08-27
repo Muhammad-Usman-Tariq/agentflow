@@ -25,6 +25,65 @@ function computeDynamicTokens(requirements: any): number {
   return Math.min(MAX_ARCHITECT_CEILING, estimated);
 }
 
+function expandFrontendFileStructure(
+  rawFileStructure: Array<{ path: string; type: string; purpose: string }>,
+  components: Array<{ name: string; filePath?: string; props?: string[]; dependencies?: string[] }>
+): Array<{ path: string; type: string; purpose: string }> {
+  // 1. Filter out directory-shaped placeholders (paths ending in / or matching generic folder patterns)
+  const cleanFiles = (rawFileStructure || []).filter((f) => {
+    if (!f || !f.path || typeof f.path !== 'string') return false;
+    const p = f.path.trim();
+
+    if (p.endsWith('/')) return false;
+    if (/^src\/(components|pages|views)\/?$/i.test(p)) return false;
+
+    const basename = p.split('/').pop() || '';
+    if (!basename.includes('.')) return false;
+
+    return true;
+  });
+
+  const existingPaths = new Set(cleanFiles.map((f) => f.path.trim()));
+
+  // 2. Expand from components list so every component has an explicit file path entry
+  if (Array.isArray(components)) {
+    for (const comp of components) {
+      const pathCandidate = (comp.filePath || (comp as any).path || '').trim();
+      if (pathCandidate && pathCandidate.includes('.')) {
+        if (!existingPaths.has(pathCandidate)) {
+          cleanFiles.push({
+            path: pathCandidate,
+            type: 'file',
+            purpose: `UI Component: ${comp.name || 'Component'}`,
+          });
+          existingPaths.add(pathCandidate);
+        }
+      }
+    }
+  }
+
+  // 3. Ensure core entry point files exist
+  if (!existingPaths.has('src/App.tsx') && !existingPaths.has('src/App.jsx')) {
+    cleanFiles.push({
+      path: 'src/App.tsx',
+      type: 'file',
+      purpose: 'Main application container and component routing',
+    });
+    existingPaths.add('src/App.tsx');
+  }
+
+  if (!existingPaths.has('src/main.tsx') && !existingPaths.has('src/main.jsx') && !existingPaths.has('src/index.tsx')) {
+    cleanFiles.push({
+      path: 'src/main.tsx',
+      type: 'file',
+      purpose: 'Application DOM entry point',
+    });
+    existingPaths.add('src/main.tsx');
+  }
+
+  return cleanFiles;
+}
+
 function synthesizeBackendFiles(
   apiRoutes: any[],
   databaseType: string,
@@ -138,41 +197,50 @@ export class ArchitectAgent extends AgentBase {
       databaseSchema: any[];
     }>(integrationJson);
 
-    // Merge into complete ProjectArchitecture
-    const architecture: ProjectArchitecture = {
-      fileStructure: structureData.fileStructure || [],
-      components: structureData.components || [],
-      apiRoutes: integrationData.apiRoutes || [],
-      databaseType: integrationData.databaseType || 'relational',
-      databaseSchema: integrationData.databaseSchema || [],
-    };
+    const rawStructureCount = structureData.fileStructure?.length || 0;
+    const componentsList = structureData.components || [];
 
-    // Synthesize backend fileStructure entries from apiRoutes and databaseSchema
-    const derivedBackendFiles = synthesizeBackendFiles(
-      architecture.apiRoutes,
-      architecture.databaseType,
-      architecture.databaseSchema
+    // 1. Expand frontend fileStructure to ensure every component has a real 1:1 file path entry
+    const expandedFrontendFiles = expandFrontendFileStructure(
+      structureData.fileStructure || [],
+      componentsList
     );
 
-    const existingPaths = new Set((architecture.fileStructure || []).map((f: any) => f.path));
+    // 2. Synthesize backend fileStructure entries from apiRoutes and databaseSchema
+    const derivedBackendFiles = synthesizeBackendFiles(
+      integrationData.apiRoutes || [],
+      integrationData.databaseType || 'relational',
+      integrationData.databaseSchema || []
+    );
+
+    const fullFileStructure: Array<{ path: string; type: string; purpose: string }> = [...expandedFrontendFiles];
+    const existingPaths = new Set(expandedFrontendFiles.map((f) => f.path));
     const addedBackendEntries: Array<{ path: string; type: string; purpose: string }> = [];
 
     for (const entry of derivedBackendFiles) {
       if (!existingPaths.has(entry.path)) {
-        architecture.fileStructure.push(entry);
+        fullFileStructure.push(entry);
         existingPaths.add(entry.path);
         addedBackendEntries.push(entry);
       }
     }
 
+    // Merge into complete ProjectArchitecture
+    const architecture: ProjectArchitecture = {
+      fileStructure: fullFileStructure,
+      components: componentsList,
+      apiRoutes: integrationData.apiRoutes || [],
+      databaseType: integrationData.databaseType || 'relational',
+      databaseSchema: integrationData.databaseSchema || [],
+    };
+
     if (!architecture.fileStructure || architecture.fileStructure.length === 0 || !architecture.components) {
       throw new Error('Architect returned incomplete architecture');
     }
 
-    const frontendCount = architecture.fileStructure.length - addedBackendEntries.length;
     console.log(`[Architect] ✅ Merged architecture planned:`);
     console.log(
-      `[Architect] Files planned: ${architecture.fileStructure.length} (${frontendCount} frontend + ${addedBackendEntries.length} backend, derived from apiRoutes/databaseSchema)`
+      `[Architect] Files planned: ${architecture.fileStructure.length} (expanded from ${rawStructureCount} raw entries + ${componentsList.length} components; ${expandedFrontendFiles.length} frontend + ${addedBackendEntries.length} backend)`
     );
     console.log(`[Architect] Components: ${architecture.components.length}`);
     console.log(`[Architect] API Routes: ${architecture.apiRoutes.length}`);
