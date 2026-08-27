@@ -1,4 +1,4 @@
-import { l as logger, D as DEFAULT_MODEL, P as PROVIDER_LIST } from './server-build-CLlMFr9I.js';
+import { l as logger, D as DEFAULT_MODEL, P as PROVIDER_LIST } from './server-build-CY_Gu9K6.js';
 import 'react/jsx-runtime';
 import '@remix-run/react';
 import 'isbot';
@@ -59,7 +59,7 @@ let logStore = null;
 const getLogStore = () => {
   if (!logStore && typeof window !== "undefined") {
     try {
-      import('./server-build-CLlMFr9I.js').then(n => n.c).then(({ logStore: store }) => {
+      import('./server-build-CY_Gu9K6.js').then(n => n.d).then(({ logStore: store }) => {
         logStore = store;
       }).catch(() => {
       });
@@ -530,7 +530,7 @@ class DebugLogger {
       const store = getLogStore();
       if (!store) {
         try {
-          const { logStore: storeModule } = await import('./server-build-CLlMFr9I.js').then(n => n.c);
+          const { logStore: storeModule } = await import('./server-build-CY_Gu9K6.js').then(n => n.d);
           logStore = storeModule;
           return this._getLogStoreLogs();
         } catch {

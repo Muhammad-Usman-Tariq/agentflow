@@ -23,7 +23,7 @@ async function getEffectiveUserIdForAgent(request: Request, env: any): Promise<s
 export async function action({ request, context }: ActionFunctionArgs) {
   const { query } = await import('~/lib/db.server');
   const body = await request.json() as any;
-  const { userRequest, chatId } = body;
+  const { userRequest, chatId, forceOverwrite } = body;
 
   if (!userRequest || !chatId) {
     return json({
@@ -37,6 +37,30 @@ export async function action({ request, context }: ActionFunctionArgs) {
   console.log(`Request: "${userRequest}"`);
 
   const env = mergeServerEnv(context.cloudflare?.env as unknown as Record<string, string | undefined> | undefined);
+
+  // ── Part 3d: load existing project from DB for classification ───────────────
+  let existingProject: { files: Record<string, string>; summary: string } | null = null;
+  try {
+    const { getProject } = await import('~/lib/db.server');
+    const existing = await getProject(chatId, env);
+    if (existing?.files) {
+      const parsedFiles: Record<string, string> =
+        typeof existing.files === 'string' ? JSON.parse(existing.files) : existing.files;
+      if (Object.keys(parsedFiles).length > 0) {
+        const fileList = Object.keys(parsedFiles).slice(0, 20).join(', ');
+        existingProject = {
+          files: parsedFiles,
+          summary: `Title: "${existing.title}". Files: ${fileList}`,
+        };
+        console.log(
+          `[Agent API] Existing project found: "${existing.title}" (${Object.keys(parsedFiles).length} files)`,
+        );
+      }
+    }
+  } catch (e: any) {
+    console.warn('[Agent API] Could not load existing project (non-fatal):', e?.message);
+  }
+  // ────────────────────────────────────────────────────────────────────────
 
   try {
     console.log('ENV CHECK:', JSON.stringify(env));
@@ -63,8 +87,19 @@ export async function action({ request, context }: ActionFunctionArgs) {
         } catch (e) {
           console.error('Failed to save progress:', e);
         }
-      }
+      },
+      existingProject,
+      forceOverwrite === true,
     );
+
+    // ── Part 4: return confirmation request before doing any generation ───────
+    if ((result as any).needsConfirmation) {
+      return json({
+        needsConfirmation: true,
+        confirmationMessage: (result as any).confirmationMessage,
+      });
+    }
+    // ────────────────────────────────────────────────────────────────────────
 
     // ── Bug 1 fix: persist files server-side before HTTP response ─────────────
     // The client-side storeMessageHistory() can be lost if the tab suspends

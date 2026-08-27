@@ -10,6 +10,7 @@ import {
   BACKEND_FILE_SYSTEM_PROMPT,
   BACKEND_FILE_USER_PROMPT,
 } from '../prompts/coder.prompt';
+import { runBuildHeal } from '../core/build-healer';
 
 const BACKEND_PATH_PREFIXES = ['server/', 'backend/', 'database/', 'migrations/'];
 
@@ -406,6 +407,87 @@ import { BrowserRouter } from 'react-router-dom';`,
   }
 }
 
+// ── Part 1d: lightweight syntax-balance checker ───────────────────────────────
+function validateSyntaxBalance(code: string, filePath: string): { valid: boolean; error?: string } {
+  if (!/\.(tsx?|jsx?)$/.test(filePath)) return { valid: true };
+
+  let braces = 0, parens = 0, brackets = 0;
+  let inSingle = false, inDouble = false, inTemplate = 0;
+
+  for (let i = 0; i < code.length; i++) {
+    const ch = code[i];
+    const prev = i > 0 ? code[i - 1] : '';
+
+    if (!inSingle && !inDouble && inTemplate === 0 && ch === '`' && prev !== '\\') { inTemplate++; continue; }
+    if (inTemplate > 0) { if (ch === '`' && prev !== '\\') inTemplate--; continue; }
+    if (!inDouble && ch === "'" && prev !== '\\') { inSingle = !inSingle; continue; }
+    if (!inSingle && ch === '"' && prev !== '\\') { inDouble = !inDouble; continue; }
+    if (inSingle || inDouble) continue;
+
+    if (ch === '{') braces++;
+    else if (ch === '}') braces--;
+    else if (ch === '(') parens++;
+    else if (ch === ')') parens--;
+    else if (ch === '[') brackets++;
+    else if (ch === ']') brackets--;
+  }
+
+  if (braces !== 0) return { valid: false, error: `Unbalanced braces (net: ${braces > 0 ? '+' : ''}${braces})` };
+  if (parens !== 0) return { valid: false, error: `Unbalanced parentheses (net: ${parens > 0 ? '+' : ''}${parens})` };
+  if (brackets !== 0) return { valid: false, error: `Unbalanced brackets (net: ${brackets > 0 ? '+' : ''}${brackets})` };
+  return { valid: true };
+}
+
+// ── Part 1c: create minimal stubs for missing local relative imports ───────────
+function resolveRelativeImport(fromFile: string, importPath: string): string {
+  const parts = fromFile.split('/');
+  parts.pop();
+  for (const seg of importPath.split('/')) {
+    if (seg === '..') parts.pop();
+    else if (seg !== '.') parts.push(seg);
+  }
+  return parts.join('/');
+}
+
+function createMissingImportStubs(files: Record<string, string>): void {
+  const IMPORT_RE = /^(?:import\s+(?:[\s\S]*?from\s+)?|export\s+\{[^}]*\}\s+from\s+)['"](\.[\/]?[^'"]+)['"]/gm;
+  const REQUIRE_RE = /require\s*\(\s*['"](\.[^'"]+)['"]\s*\)/g;
+  const TRY_EXTS = ['', '.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js', '/index.jsx'];
+  const stubs: Record<string, string> = {};
+
+  for (const [filePath, content] of Object.entries(files)) {
+    if (!/\.(tsx?|jsx?)$/.test(filePath)) continue;
+
+    for (const re of [IMPORT_RE, REQUIRE_RE]) {
+      re.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(content)) !== null) {
+        const importPath = m[1];
+        const resolved = resolveRelativeImport(filePath, importPath);
+        const exists = TRY_EXTS.some((ext) => (resolved + ext) in files || (resolved + ext) in stubs);
+        if (exists) continue;
+
+        const ext = resolved.includes('.') ? resolved.split('.').pop()! : '';
+        if (ext === 'css' || ext === 'scss' || ext === 'sass') {
+          stubs[resolved] = '/* auto-generated stub */\n';
+        } else if (['ts', 'tsx', 'js', 'jsx'].includes(ext)) {
+          stubs[resolved] = 'export {};\n';
+        } else if (!ext) {
+          stubs[resolved + '.tsx'] = 'export {};\n';
+        }
+        // Unknown extension → skip
+      }
+    }
+  }
+
+  for (const [stubPath, content] of Object.entries(stubs)) {
+    if (!(stubPath in files)) {
+      files[stubPath] = content;
+      console.log(`[Coder] ⚠️ Created stub for missing local import: ${stubPath}`);
+    }
+  }
+}
+
 export class CoderAgent extends AgentBase {
   constructor(env?: Record<string, string>) {
     super({
@@ -455,14 +537,80 @@ export class CoderAgent extends AgentBase {
     reconcileDependencies(allFiles);
     // ────────────────────────────────────────────────────────────────────────
 
+    // ── Part 1c: create stubs for any missing local relative imports ──────────
+    createMissingImportStubs(allFiles);
+    // ────────────────────────────────────────────────────────────────────────
+
     console.log(`[Coder] Total files generated: ${Object.keys(allFiles).length}`);
     Object.keys(allFiles).forEach((f) => console.log(`  → ${f}`));
+
+    // ── Part 2: build self-healing loop (Node.js only, skipped on Workers) ───
+    const healResult = await runBuildHeal(allFiles, this.callLLM.bind(this));
+    const healedFiles = healResult.files;
+    if (healResult.buildWarnings.length > 0) {
+      healResult.buildWarnings.forEach((w) => console.warn(`[BuildHealer] ⚠️ ${w}`));
+    }
+    // ────────────────────────────────────────────────────────────────────────
 
     return {
       success: true,
       agentName: 'coder',
-      data: allFiles,
+      data: healedFiles,
+      ...(healResult.buildWarnings.length > 0 ? { warnings: healResult.buildWarnings } : {}),
     };
+  }
+
+  // ── Part 1d: generate one file safely with syntax validation + retry ────────
+  private async generateSingleFileSafe(
+    systemPrompt: string,
+    userPromptFn: () => string,
+    filePath: string,
+  ): Promise<string | null> {
+    const MAX_RETRIES = 2;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      let code: string;
+      try {
+        const isRetry = attempt > 0;
+        const prompt = isRetry
+          ? `The previous response for "${filePath}" had a syntax error (unbalanced braces/parens/brackets). ` +
+            `Rewrite the COMPLETE file from scratch.\n` +
+            `IMPORTANT: Define all object/array constants as separate const variables ABOVE the component — ` +
+            `never inline complex objects as JSX prop values. Ensure all {}, (), [] are perfectly balanced.\n\n` +
+            userPromptFn()
+          : userPromptFn();
+
+        const raw = await this.callLLM(systemPrompt, prompt, false, PER_FILE_TIMEOUT_MS);
+        code = this.stripCodeFence(raw);
+      } catch (err: any) {
+        console.error(`[Coder] ⚠️ LLM call failed for ${filePath} (attempt ${attempt + 1}/${MAX_RETRIES + 1}): ${err.message}`);
+        if (attempt === MAX_RETRIES) return null;
+        continue;
+      }
+
+      const check = validateSyntaxBalance(code, filePath);
+      if (check.valid) return code;
+
+      console.warn(`[Coder] ⚠️ Syntax imbalance in ${filePath} (attempt ${attempt + 1}/${MAX_RETRIES + 1}): ${check.error}`);
+      if (attempt === MAX_RETRIES) {
+        console.error(`[Coder] ❌ ${filePath} still has syntax issues after ${MAX_RETRIES} retries — using placeholder stub`);
+        return null;
+      }
+    }
+    return null;
+  }
+
+  private createPlaceholderStub(filePath: string, purpose: string): string {
+    const ext = (filePath.split('.').pop() || '').toLowerCase();
+    if (ext === 'css' || ext === 'scss') return `/* Placeholder: ${purpose} — generation failed */\n`;
+    if (ext === 'sql') return `-- Placeholder: ${purpose} — generation failed\n`;
+    const name = (filePath.split('/').pop() || 'Component').replace(/\.(tsx?|jsx?)$/, '');
+    return (
+      `// ⚠️ Placeholder: ${purpose} — generation failed after retries\n` +
+      `export default function ${name}() {\n` +
+      `  return <div style={{padding:16,color:'red'}}>⚠️ ${name} could not be generated</div>;\n` +
+      `}\n`
+    );
   }
 
   private async generatePerFile(
@@ -485,39 +633,37 @@ export class CoderAgent extends AgentBase {
     );
 
     for (const file of frontendFiles) {
-      try {
-        console.log(`[Coder] → ${file.path}`);
-        const raw = await this.callLLM(
-          FRONTEND_FILE_SYSTEM_PROMPT,
-          FRONTEND_FILE_USER_PROMPT(requirements, architecture, designDecisions, file.path, file.purpose),
-          false,
-          PER_FILE_TIMEOUT_MS,
-        );
-        files[file.path] = this.stripCodeFence(raw);
-      } catch (error: any) {
-        console.error(`[Coder] ⚠️ Failed to generate ${file.path}, skipping: ${error.message}`);
+      console.log(`[Coder] → ${file.path}`);
+      const code = await this.generateSingleFileSafe(
+        FRONTEND_FILE_SYSTEM_PROMPT,
+        () => FRONTEND_FILE_USER_PROMPT(requirements, architecture, designDecisions, file.path, file.purpose),
+        file.path,
+      );
+      if (code !== null) {
+        files[file.path] = code;
+      } else {
+        files[file.path] = this.createPlaceholderStub(file.path, file.purpose);
         failed.push(file.path);
       }
     }
 
     for (const file of backendFiles) {
-      try {
-        console.log(`[Coder] → ${file.path}`);
-        const raw = await this.callLLM(
-          BACKEND_FILE_SYSTEM_PROMPT,
-          BACKEND_FILE_USER_PROMPT(architecture, file.path, file.purpose),
-          false,
-          PER_FILE_TIMEOUT_MS,
-        );
-        files[file.path] = this.stripCodeFence(raw);
-      } catch (error: any) {
-        console.error(`[Coder] ⚠️ Failed to generate ${file.path}, skipping: ${error.message}`);
+      console.log(`[Coder] → ${file.path}`);
+      const code = await this.generateSingleFileSafe(
+        BACKEND_FILE_SYSTEM_PROMPT,
+        () => BACKEND_FILE_USER_PROMPT(architecture, file.path, file.purpose),
+        file.path,
+      );
+      if (code !== null) {
+        files[file.path] = code;
+      } else {
+        files[file.path] = this.createPlaceholderStub(file.path, file.purpose);
         failed.push(file.path);
       }
     }
 
     if (failed.length > 0) {
-      console.warn(`[Coder] ${failed.length} file(s) failed and were skipped: ${failed.join(', ')}`);
+      console.warn(`[Coder] ${failed.length} file(s) fell back to stub after retries: ${failed.join(', ')}`);
     }
 
     return files;

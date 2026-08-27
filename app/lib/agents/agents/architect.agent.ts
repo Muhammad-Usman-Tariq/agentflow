@@ -227,10 +227,9 @@ export class ArchitectAgent extends AgentBase {
 
     // Merge into complete ProjectArchitecture
     const architecture: ProjectArchitecture = {
-      fileStructure: fullFileStructure,
+      fileStructure: fullFileStructure as any as FileNode[],
       components: componentsList,
       apiRoutes: integrationData.apiRoutes || [],
-      databaseType: integrationData.databaseType || 'relational',
       databaseSchema: integrationData.databaseSchema || [],
     };
 
@@ -244,7 +243,7 @@ export class ArchitectAgent extends AgentBase {
     );
     console.log(`[Architect] Components: ${architecture.components.length}`);
     console.log(`[Architect] API Routes: ${architecture.apiRoutes.length}`);
-    console.log(`[Architect] DB Type: ${architecture.databaseType}, Schemas: ${architecture.databaseSchema.length}`);
+    console.log(`[Architect] DB Type: ${(integrationData as any).databaseType || 'relational'}, Schemas: ${(architecture.databaseSchema || []).length}`);
 
     return {
       success: true,

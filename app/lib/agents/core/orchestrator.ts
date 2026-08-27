@@ -3,6 +3,7 @@ import type { AgentInput, AgentOutput } from '../types/agent.types';
 import type { AgentPlan } from '../types/task.types';
 import type { ProjectType } from '../types/project.types';
 import { ORCHESTRATOR_SYSTEM_PROMPT, ORCHESTRATOR_USER_PROMPT } from '../prompts/orchestrator.prompt';
+import { EDITOR_CLASSIFICATION_SYSTEM_PROMPT, EDITOR_CLASSIFICATION_USER_PROMPT } from '../prompts/editor.prompt';
 import { createAgentRun, updateRunStatus } from './agent-memory';
 import { runAgentPlan, type ProgressCallback } from './agent-runner';
 
@@ -35,17 +36,60 @@ export class Orchestrator extends AgentBase {
   async start(
     userRequest: string,
     chatId: string,
-    onProgress?: ProgressCallback
+    onProgress?: ProgressCallback,
+    existingProject?: { files: Record<string, string>; summary: string } | null,
+    forceOverwrite?: boolean,
   ): Promise<{
     success: boolean;
     files?: Record<string, string>;
     runId?: number;
     error?: string;
+    needsConfirmation?: boolean;
+    confirmationMessage?: string;
   }> {
     console.log('\n🧠 Orchestrator starting...');
     console.log(`Request: "${userRequest}"`);
 
     try {
+      // ── Part 3: classify if an existing project is present ──────────────────────
+      if (existingProject && !forceOverwrite && Object.keys(existingProject.files).length > 0) {
+        console.log('\n🔍 Classifying request against existing project...');
+        try {
+          const classJson = await this.callLLM(
+            EDITOR_CLASSIFICATION_SYSTEM_PROMPT,
+            EDITOR_CLASSIFICATION_USER_PROMPT(userRequest, existingProject.summary),
+            true,
+          );
+          const cls = this.parseJson<{ classification: string; reasoning: string }>(classJson);
+          console.log(`[Orchestrator] Classification: ${cls.classification} — ${cls.reasoning}`);
+
+          if (cls.classification === 'related-edit') {
+            const { EditorAgent } = await import('../agents/editor.agent');
+            const editor = new EditorAgent(this.env);
+            const editResult = await editor.run({
+              userRequest,
+              chatId,
+              context: { existingFiles: existingProject.files } as any,
+            });
+            if (!editResult.success) throw new Error(editResult.error || 'EditorAgent failed');
+            return { success: true, files: editResult.data };
+          }
+
+          if (cls.classification === 'unrelated-new' || cls.classification === 'ambiguous') {
+            return {
+              success: true,
+              needsConfirmation: true,
+              confirmationMessage:
+                'This looks like a different project than what\'s currently open here. Continuing will replace your current project\'s files.',
+            } as any;
+          }
+        } catch (classErr: any) {
+          // Classification failure is non-fatal — fall through to full pipeline
+          console.warn(`[Orchestrator] Classification failed (${classErr.message}) — proceeding with full pipeline`);
+        }
+      }
+      // ────────────────────────────────────────────────────────────────────────
+
       // Step 1 — Detect project type and build execution plan
       const plan = await this.buildPlan(userRequest);
       console.log(`\n📋 Plan ready — Project: ${plan.projectType}`);

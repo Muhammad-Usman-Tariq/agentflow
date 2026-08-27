@@ -124,6 +124,12 @@ export const ChatImpl = memo(
     const [agentRunning, setAgentRunning] = useState(false);
     const isAgentRunningRef = useRef(false);
 
+    // Part 4: confirmation state for "unrelated new project" flow
+    const [confirmationPending, setConfirmationPending] = useState<{
+      userRequest: string;
+      message: string;
+    } | null>(null);
+
     // ⚠️ FIX: holds the message that's waiting for the backend orchestrator (/api/agent)
     // once the main /api/chat stream finishes — see onFinish below. This is what lets us
     // sequence the two LLM calls instead of firing them at the same instant.
@@ -432,6 +438,17 @@ export const ChatImpl = memo(
         const result = await res.json() as any;
         console.log('🤖 Agent result:', result.success, 'files:', Object.keys(result.files || {}).length);
 
+        // ── Part 4: handle needsConfirmation before writing any files ──────────
+        if (result.needsConfirmation) {
+          setConfirmationPending({
+            userRequest: messageContent,
+            message: result.confirmationMessage ||
+              'This looks like a different project. Continuing will replace your current project\'s files.',
+          });
+          return;
+        }
+        // ────────────────────────────────────────────────────────────────────────
+
         if (result.success && result.runId) {
           setAgentRunId(result.runId);
         }
@@ -711,6 +728,119 @@ export const ChatImpl = memo(
 
     return (
       <>
+        {/* ── Part 4: blocking confirmation banner ────────────────────────── */}
+        {confirmationPending && (
+          <div
+            id="agent-new-project-confirmation"
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 9999,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'rgba(0,0,0,0.6)',
+              backdropFilter: 'blur(4px)',
+            }}
+          >
+            <div
+              style={{
+                background: '#1e1e2e',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: 16,
+                padding: '32px 28px',
+                maxWidth: 460,
+                width: '90%',
+                boxShadow: '0 24px 64px rgba(0,0,0,0.5)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 20,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontSize: 28 }}>⚠️</span>
+                <h2 style={{ margin: 0, fontSize: 18, color: '#fff', fontWeight: 600 }}>
+                  Different Project Detected
+                </h2>
+              </div>
+              <p style={{ margin: 0, color: 'rgba(255,255,255,0.7)', fontSize: 14, lineHeight: 1.6 }}>
+                {confirmationPending.message}
+              </p>
+              <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+                <button
+                  id="agent-confirm-new-chat"
+                  onClick={() => {
+                    setConfirmationPending(null);
+                    window.location.href = '/';
+                  }}
+                  style={{
+                    padding: '10px 18px',
+                    borderRadius: 8,
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    background: 'transparent',
+                    color: 'rgba(255,255,255,0.8)',
+                    cursor: 'pointer',
+                    fontSize: 14,
+                    fontWeight: 500,
+                  }}
+                >
+                  Start a new chat
+                </button>
+                <button
+                  id="agent-confirm-overwrite"
+                  onClick={async () => {
+                    const req = confirmationPending.userRequest;
+                    setConfirmationPending(null);
+                    // Re-submit with forceOverwrite: true — skips classification
+                    let currentChatId = chatId.get();
+                    if (!currentChatId) { currentChatId = String(Date.now()); chatId.set(currentChatId); }
+                    try {
+                      isAgentRunningRef.current = true;
+                      setAgentRunning(true);
+                      const res = await fetch('/api/agent', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userRequest: req, chatId: currentChatId, forceOverwrite: true }),
+                      });
+                      const result = await res.json() as any;
+                      if (result.success && result.files && Object.keys(result.files).length > 0) {
+                        const { webcontainer } = await import('~/lib/webcontainer');
+                        const container = await webcontainer;
+                        for (const [fp, content] of Object.entries(result.files as Record<string, string>)) {
+                          const cp = fp.startsWith('/') ? fp : '/' + fp;
+                          try {
+                            const dir = cp.substring(0, cp.lastIndexOf('/'));
+                            if (dir && dir !== '/') await container.fs.mkdir(dir, { recursive: true });
+                            await container.fs.writeFile(cp, content, { encoding: 'utf8' });
+                          } catch {}
+                        }
+                        const fm = Object.fromEntries(Object.entries(result.files as Record<string, string>).map(([p, c]) => [p.replace(/^\/+/, ''), { type: 'file' as const, content: c, isBinary: false }]));
+                        for (const [path, dirent] of Object.entries(fm)) workbenchStore.files.setKey(path, dirent);
+                        workbenchStore.setDocuments(fm);
+                        workbenchStore.showWorkbench.set(true);
+                      }
+                    } catch (e) { console.error('Overwrite agent error:', e); }
+                    finally { isAgentRunningRef.current = false; setAgentRunning(false); }
+                  }}
+                  style={{
+                    padding: '10px 18px',
+                    borderRadius: 8,
+                    border: 'none',
+                    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    fontSize: 14,
+                    fontWeight: 600,
+                    boxShadow: '0 4px 12px rgba(99,102,241,0.4)',
+                  }}
+                >
+                  Overwrite and continue here
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* ─────────────────────────────────────────────────────────────── */}
         <BaseChat
           ref={animationScope}
           textareaRef={textareaRef}

@@ -139,7 +139,7 @@ let debugLogger = null;
 const getDebugLogger = () => {
   if (!debugLogger && typeof window !== "undefined") {
     try {
-      import('./debugLogger-XrJygLEP.js').then(({ debugLogger: loggerInstance }) => {
+      import('./debugLogger-BbEpjNye.js').then(({ debugLogger: loggerInstance }) => {
         debugLogger = loggerInstance;
       }).catch(() => {
       });
@@ -661,7 +661,7 @@ function App() {
       userAgent: navigator.userAgent,
       timestamp: (/* @__PURE__ */ new Date()).toISOString()
     });
-    import('./debugLogger-XrJygLEP.js').then(({ debugLogger }) => {
+    import('./debugLogger-BbEpjNye.js').then(({ debugLogger }) => {
       const status = debugLogger.getStatus();
       logStore.logSystem("Debug logging ready", {
         initialized: status.initialized,
@@ -7888,6 +7888,14 @@ async function query(text, params, env) {
     }
   }
 }
+async function getProject(id, env) {
+  const result = await query(
+    "SELECT * FROM projects WHERE chat_id = $1 OR id::text = $1",
+    [id],
+    env
+  );
+  return result.rows[0];
+}
 async function createUser(email, passwordHash, name, env) {
   const result = await query(
     `INSERT INTO users (email, password_hash, name)
@@ -8004,6 +8012,7 @@ const db_server = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty(
   deleteProjectForUser,
   emailExists,
   getAllProjectsForUser,
+  getProject,
   getProjectForUser,
   getUserByEmail,
   query,
@@ -8993,6 +9002,51 @@ if the request above mentions other role names.
 Return execution plan JSON only.
 `;
 
+const EDITOR_CLASSIFICATION_SYSTEM_PROMPT = `
+You classify whether a new user request is related to an existing project or is a completely different new project.
+Return ONLY valid JSON: { "classification": "related-edit" | "unrelated-new" | "ambiguous", "reasoning": "<one sentence>" }
+
+Definitions:
+- "related-edit": the request clearly modifies, fixes, adds features to, or extends the existing project (same domain/system)
+- "unrelated-new": the request clearly describes a completely different application or project
+- "ambiguous": genuinely unclear — could be either; when in doubt pick this
+`.trim();
+const EDITOR_CLASSIFICATION_USER_PROMPT = (userRequest, projectSummary) => `Existing project summary:
+${projectSummary}
+
+New user request: "${userRequest}"
+
+Return JSON only.`;
+const EDITOR_SYSTEM_PROMPT = `
+You are an expert code editor making surgical, targeted changes to an existing codebase.
+
+STRICT RULES:
+1. Modify ONLY the files that need to change to satisfy the user's request.
+2. Do NOT rewrite, remove, or restructure any existing function, component, or route that is NOT directly related to the request.
+3. Preserve all currently-working code exactly as-is within any file you touch.
+4. Only include files that actually changed in the output — do NOT include unchanged files.
+5. If you need to add a new file, include it in changedFiles with its full path and complete content.
+
+Return ONLY this JSON (no explanation, no markdown):
+{
+  "changedFiles": {
+    "path/to/changed/file.tsx": "complete updated file content here",
+    "path/to/new/file.ts": "complete new file content here"
+  }
+}
+`.trim();
+const EDITOR_USER_PROMPT = (userRequest, relevantFileContents, allFilePaths) => `User request: "${userRequest}"
+
+All files in existing project (${allFilePaths.length} total):
+${allFilePaths.join(", ")}
+
+Most relevant existing file contents (for context):
+` + Object.entries(relevantFileContents).map(([path, content]) => `
+--- ${path} ---
+${content.slice(0, 1500)}`).join("\n") + `
+
+Make targeted changes only. Return JSON with changedFiles only.`;
+
 async function createAgentRun(chatId, projectType, userRequest, env) {
   const result = await query(
     `INSERT INTO agent_runs (chat_id, status, project_type, requirements)
@@ -9284,7 +9338,6 @@ class ArchitectAgent extends AgentBase {
       fileStructure: fullFileStructure,
       components: componentsList,
       apiRoutes: integrationData.apiRoutes || [],
-      databaseType: integrationData.databaseType || "relational",
       databaseSchema: integrationData.databaseSchema || []
     };
     if (!architecture.fileStructure || architecture.fileStructure.length === 0 || !architecture.components) {
@@ -9296,7 +9349,7 @@ class ArchitectAgent extends AgentBase {
     );
     console.log(`[Architect] Components: ${architecture.components.length}`);
     console.log(`[Architect] API Routes: ${architecture.apiRoutes.length}`);
-    console.log(`[Architect] DB Type: ${architecture.databaseType}, Schemas: ${architecture.databaseSchema.length}`);
+    console.log(`[Architect] DB Type: ${integrationData.databaseType || "relational"}, Schemas: ${(architecture.databaseSchema || []).length}`);
     return {
       success: true,
       agentName: "architect",
@@ -9416,6 +9469,154 @@ Path: ${filePath}
 Purpose: ${purpose}
 
 Output only the raw file content, nothing else.`;
+
+const MAX_HEAL_ROUNDS = 3;
+const NPM_INSTALL_TIMEOUT_MS = 12e4;
+const NPM_BUILD_TIMEOUT_MS = 9e4;
+const LLM_FIX_TIMEOUT_MS = 6e4;
+async function runBuildHeal(files, callLLM) {
+  const warnings = [];
+  let cp = null;
+  let fsMod = null;
+  let pathMod = null;
+  let osMod = null;
+  try {
+    cp = await import('child_process');
+    fsMod = await import('fs/promises');
+    pathMod = await import('path');
+    osMod = await import('os');
+  } catch {
+    console.log("[BuildHealer] Skipping — child_process not available in this environment");
+    return { files, buildWarnings: [] };
+  }
+  const tmpBase = pathMod.join(osMod.tmpdir(), `agentflow-build-${Date.now()}`);
+  let currentFiles = { ...files };
+  for (let round = 1; round <= MAX_HEAL_ROUNDS; round++) {
+    console.log(
+      `[BuildHealer] Round ${round}/${MAX_HEAL_ROUNDS} — writing ${Object.keys(currentFiles).length} files to temp dir`
+    );
+    try {
+      await fsMod.rm(tmpBase, { recursive: true, force: true });
+      await fsMod.mkdir(tmpBase, { recursive: true });
+      for (const [filePath, content] of Object.entries(currentFiles)) {
+        const absPath = pathMod.join(tmpBase, filePath);
+        await fsMod.mkdir(pathMod.dirname(absPath), { recursive: true });
+        await fsMod.writeFile(absPath, content, "utf-8");
+      }
+    } catch (e) {
+      console.error(`[BuildHealer] Failed to write temp dir: ${e.message}`);
+      warnings.push(`BuildHealer: temp dir write failed — ${e.message}`);
+      return { files: currentFiles, buildWarnings: warnings };
+    }
+    const installResult = await execWithTimeout(
+      cp,
+      "npm install --prefer-offline --no-audit --no-fund",
+      tmpBase,
+      NPM_INSTALL_TIMEOUT_MS
+    );
+    if (!installResult.success) {
+      const snippet = (installResult.stderr + installResult.stdout).slice(0, 500);
+      console.warn(`[BuildHealer] npm install failed (round ${round}): ${snippet}`);
+      if (round === MAX_HEAL_ROUNDS) {
+        warnings.push(`BuildHealer: npm install still failing after ${MAX_HEAL_ROUNDS} rounds.
+${snippet}`);
+      }
+      continue;
+    }
+    const buildResult = await execWithTimeout(cp, "npm run build", tmpBase, NPM_BUILD_TIMEOUT_MS);
+    if (buildResult.success) {
+      console.log(`[BuildHealer] ✅ Build passed on round ${round}`);
+      try {
+        await fsMod.rm(tmpBase, { recursive: true, force: true });
+      } catch {
+      }
+      return { files: currentFiles, buildWarnings: warnings };
+    }
+    const errorOutput = `${buildResult.stderr}
+${buildResult.stdout}`.slice(0, 3e3);
+    console.warn(`[BuildHealer] Build failed (round ${round}):
+${errorOutput.slice(0, 500)}`);
+    if (round === MAX_HEAL_ROUNDS) {
+      warnings.push(
+        `BuildHealer: build still failing after ${MAX_HEAL_ROUNDS} rounds. Last error:
+${errorOutput.slice(0, 1e3)}`
+      );
+      break;
+    }
+    const implicatedPath = identifyFailingFile(errorOutput, currentFiles);
+    if (!implicatedPath) {
+      warnings.push(
+        `BuildHealer round ${round}: could not identify failing file from error — skipping LLM fix.
+Error: ${errorOutput.slice(0, 400)}`
+      );
+      break;
+    }
+    console.log(`[BuildHealer] Attempting LLM fix for: ${implicatedPath}`);
+    const failingContent = currentFiles[implicatedPath] || "(empty)";
+    try {
+      const fixPrompt = `You are fixing a build error in a generated web application.
+
+File with error: ${implicatedPath}
+
+Current file content:
+\`\`\`
+${failingContent.slice(0, 2e3)}
+\`\`\`
+
+Build error:
+\`\`\`
+${errorOutput.slice(0, 1e3)}
+\`\`\`
+
+INSTRUCTIONS:
+- Fix ONLY the error shown above
+- Output ONLY the raw corrected file content — no markdown, no explanation
+- Ensure all braces, parentheses, and brackets are balanced
+- Define complex object/array values as const variables above the component — never inline them as JSX prop values`;
+      const fixed = await callLLM(
+        "You are an expert TypeScript/React developer. Fix the build error. Output only raw file content, no markdown.",
+        fixPrompt,
+        false,
+        LLM_FIX_TIMEOUT_MS
+      );
+      currentFiles[implicatedPath] = fixed.replace(/^```[\w]*\r?\n?/, "").replace(/\r?\n?```$/, "");
+      console.log(`[BuildHealer] Applied LLM fix to ${implicatedPath}, retrying build (round ${round + 1})...`);
+    } catch (fixErr) {
+      console.error(`[BuildHealer] LLM fix failed for ${implicatedPath}: ${fixErr.message}`);
+      warnings.push(`BuildHealer: LLM fix for ${implicatedPath} failed — ${fixErr.message}`);
+      break;
+    }
+  }
+  try {
+    await fsMod.rm(tmpBase, { recursive: true, force: true });
+  } catch {
+  }
+  return { files: currentFiles, buildWarnings: warnings };
+}
+function execWithTimeout(cp, cmd, cwd, timeout) {
+  return new Promise((resolve) => {
+    cp.exec(
+      cmd,
+      { cwd, timeout, maxBuffer: 5 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        resolve({ success: !err, stdout: stdout || "", stderr: stderr || "" });
+      }
+    );
+  });
+}
+function identifyFailingFile(errorOutput, files) {
+  const fileKeys = Object.keys(files);
+  const FILE_REF_RE = /([a-zA-Z0-9_./\\-]+\.(tsx|ts|jsx|js|css|json))[:\s(]/g;
+  let m;
+  while ((m = FILE_REF_RE.exec(errorOutput)) !== null) {
+    const candidate = m[1].replace(/\\/g, "/").replace(/^\/+/, "");
+    const match = fileKeys.find(
+      (k) => k === candidate || k.endsWith("/" + candidate) || candidate.endsWith(k)
+    );
+    if (match) return match;
+  }
+  return null;
+}
 
 const BACKEND_PATH_PREFIXES = ["server/", "backend/", "database/", "migrations/"];
 function isBackendPath(path) {
@@ -9758,6 +9959,84 @@ import { BrowserRouter } from 'react-router-dom';`
     console.warn(`[Coder] ensureBrowserRouter: wrapped existing ${mainEntry} render in <BrowserRouter>`);
   }
 }
+function validateSyntaxBalance(code, filePath) {
+  if (!/\.(tsx?|jsx?)$/.test(filePath)) return { valid: true };
+  let braces = 0, parens = 0, brackets = 0;
+  let inSingle = false, inDouble = false, inTemplate = 0;
+  for (let i = 0; i < code.length; i++) {
+    const ch = code[i];
+    const prev = i > 0 ? code[i - 1] : "";
+    if (!inSingle && !inDouble && inTemplate === 0 && ch === "`" && prev !== "\\") {
+      inTemplate++;
+      continue;
+    }
+    if (inTemplate > 0) {
+      if (ch === "`" && prev !== "\\") inTemplate--;
+      continue;
+    }
+    if (!inDouble && ch === "'" && prev !== "\\") {
+      inSingle = !inSingle;
+      continue;
+    }
+    if (!inSingle && ch === '"' && prev !== "\\") {
+      inDouble = !inDouble;
+      continue;
+    }
+    if (inSingle || inDouble) continue;
+    if (ch === "{") braces++;
+    else if (ch === "}") braces--;
+    else if (ch === "(") parens++;
+    else if (ch === ")") parens--;
+    else if (ch === "[") brackets++;
+    else if (ch === "]") brackets--;
+  }
+  if (braces !== 0) return { valid: false, error: `Unbalanced braces (net: ${braces > 0 ? "+" : ""}${braces})` };
+  if (parens !== 0) return { valid: false, error: `Unbalanced parentheses (net: ${parens > 0 ? "+" : ""}${parens})` };
+  if (brackets !== 0) return { valid: false, error: `Unbalanced brackets (net: ${brackets > 0 ? "+" : ""}${brackets})` };
+  return { valid: true };
+}
+function resolveRelativeImport(fromFile, importPath) {
+  const parts = fromFile.split("/");
+  parts.pop();
+  for (const seg of importPath.split("/")) {
+    if (seg === "..") parts.pop();
+    else if (seg !== ".") parts.push(seg);
+  }
+  return parts.join("/");
+}
+function createMissingImportStubs(files) {
+  const IMPORT_RE = /^(?:import\s+(?:[\s\S]*?from\s+)?|export\s+\{[^}]*\}\s+from\s+)['"](\.[\/]?[^'"]+)['"]/gm;
+  const REQUIRE_RE = /require\s*\(\s*['"](\.[^'"]+)['"]\s*\)/g;
+  const TRY_EXTS = ["", ".ts", ".tsx", ".js", ".jsx", "/index.ts", "/index.tsx", "/index.js", "/index.jsx"];
+  const stubs = {};
+  for (const [filePath, content] of Object.entries(files)) {
+    if (!/\.(tsx?|jsx?)$/.test(filePath)) continue;
+    for (const re of [IMPORT_RE, REQUIRE_RE]) {
+      re.lastIndex = 0;
+      let m;
+      while ((m = re.exec(content)) !== null) {
+        const importPath = m[1];
+        const resolved = resolveRelativeImport(filePath, importPath);
+        const exists = TRY_EXTS.some((ext2) => resolved + ext2 in files || resolved + ext2 in stubs);
+        if (exists) continue;
+        const ext = resolved.includes(".") ? resolved.split(".").pop() : "";
+        if (ext === "css" || ext === "scss" || ext === "sass") {
+          stubs[resolved] = "/* auto-generated stub */\n";
+        } else if (["ts", "tsx", "js", "jsx"].includes(ext)) {
+          stubs[resolved] = "export {};\n";
+        } else if (!ext) {
+          stubs[resolved + ".tsx"] = "export {};\n";
+        }
+      }
+    }
+  }
+  for (const [stubPath, content] of Object.entries(stubs)) {
+    if (!(stubPath in files)) {
+      files[stubPath] = content;
+      console.log(`[Coder] ⚠️ Created stub for missing local import: ${stubPath}`);
+    }
+  }
+}
 class CoderAgent extends AgentBase {
   constructor(env) {
     super({
@@ -9793,13 +10072,61 @@ class CoderAgent extends AgentBase {
       ...integrationFiles
     };
     reconcileDependencies(allFiles);
+    createMissingImportStubs(allFiles);
     console.log(`[Coder] Total files generated: ${Object.keys(allFiles).length}`);
     Object.keys(allFiles).forEach((f) => console.log(`  → ${f}`));
+    const healResult = await runBuildHeal(allFiles, this.callLLM.bind(this));
+    const healedFiles = healResult.files;
+    if (healResult.buildWarnings.length > 0) {
+      healResult.buildWarnings.forEach((w) => console.warn(`[BuildHealer] ⚠️ ${w}`));
+    }
     return {
       success: true,
       agentName: "coder",
-      data: allFiles
+      data: healedFiles,
+      ...healResult.buildWarnings.length > 0 ? { warnings: healResult.buildWarnings } : {}
     };
+  }
+  // ── Part 1d: generate one file safely with syntax validation + retry ────────
+  async generateSingleFileSafe(systemPrompt, userPromptFn, filePath) {
+    const MAX_RETRIES = 2;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      let code;
+      try {
+        const isRetry = attempt > 0;
+        const prompt = isRetry ? `The previous response for "${filePath}" had a syntax error (unbalanced braces/parens/brackets). Rewrite the COMPLETE file from scratch.
+IMPORTANT: Define all object/array constants as separate const variables ABOVE the component — never inline complex objects as JSX prop values. Ensure all {}, (), [] are perfectly balanced.
+
+` + userPromptFn() : userPromptFn();
+        const raw = await this.callLLM(systemPrompt, prompt, false, PER_FILE_TIMEOUT_MS);
+        code = this.stripCodeFence(raw);
+      } catch (err) {
+        console.error(`[Coder] ⚠️ LLM call failed for ${filePath} (attempt ${attempt + 1}/${MAX_RETRIES + 1}): ${err.message}`);
+        if (attempt === MAX_RETRIES) return null;
+        continue;
+      }
+      const check = validateSyntaxBalance(code, filePath);
+      if (check.valid) return code;
+      console.warn(`[Coder] ⚠️ Syntax imbalance in ${filePath} (attempt ${attempt + 1}/${MAX_RETRIES + 1}): ${check.error}`);
+      if (attempt === MAX_RETRIES) {
+        console.error(`[Coder] ❌ ${filePath} still has syntax issues after ${MAX_RETRIES} retries — using placeholder stub`);
+        return null;
+      }
+    }
+    return null;
+  }
+  createPlaceholderStub(filePath, purpose) {
+    const ext = (filePath.split(".").pop() || "").toLowerCase();
+    if (ext === "css" || ext === "scss") return `/* Placeholder: ${purpose} — generation failed */
+`;
+    if (ext === "sql") return `-- Placeholder: ${purpose} — generation failed
+`;
+    const name = (filePath.split("/").pop() || "Component").replace(/\.(tsx?|jsx?)$/, "");
+    return `// ⚠️ Placeholder: ${purpose} — generation failed after retries
+export default function ${name}() {
+  return <div style={{padding:16,color:'red'}}>⚠️ ${name} could not be generated</div>;
+}
+`;
   }
   async generatePerFile(fileList, requirements, architecture, designDecisions) {
     const files = {};
@@ -9811,37 +10138,35 @@ class CoderAgent extends AgentBase {
       `[Coder] Generating ${frontendFiles.length} frontend file(s) and ${backendFiles.length} backend/database file(s), one call each` + (skippedConfigCount > 0 ? ` (${skippedConfigCount} config file(s) handled by template, no LLM call needed)` : "") + "..."
     );
     for (const file of frontendFiles) {
-      try {
-        console.log(`[Coder] → ${file.path}`);
-        const raw = await this.callLLM(
-          FRONTEND_FILE_SYSTEM_PROMPT,
-          FRONTEND_FILE_USER_PROMPT(requirements, architecture, designDecisions, file.path, file.purpose),
-          false,
-          PER_FILE_TIMEOUT_MS
-        );
-        files[file.path] = this.stripCodeFence(raw);
-      } catch (error) {
-        console.error(`[Coder] ⚠️ Failed to generate ${file.path}, skipping: ${error.message}`);
+      console.log(`[Coder] → ${file.path}`);
+      const code = await this.generateSingleFileSafe(
+        FRONTEND_FILE_SYSTEM_PROMPT,
+        () => FRONTEND_FILE_USER_PROMPT(requirements, architecture, designDecisions, file.path, file.purpose),
+        file.path
+      );
+      if (code !== null) {
+        files[file.path] = code;
+      } else {
+        files[file.path] = this.createPlaceholderStub(file.path, file.purpose);
         failed.push(file.path);
       }
     }
     for (const file of backendFiles) {
-      try {
-        console.log(`[Coder] → ${file.path}`);
-        const raw = await this.callLLM(
-          BACKEND_FILE_SYSTEM_PROMPT,
-          BACKEND_FILE_USER_PROMPT(architecture, file.path, file.purpose),
-          false,
-          PER_FILE_TIMEOUT_MS
-        );
-        files[file.path] = this.stripCodeFence(raw);
-      } catch (error) {
-        console.error(`[Coder] ⚠️ Failed to generate ${file.path}, skipping: ${error.message}`);
+      console.log(`[Coder] → ${file.path}`);
+      const code = await this.generateSingleFileSafe(
+        BACKEND_FILE_SYSTEM_PROMPT,
+        () => BACKEND_FILE_USER_PROMPT(architecture, file.path, file.purpose),
+        file.path
+      );
+      if (code !== null) {
+        files[file.path] = code;
+      } else {
+        files[file.path] = this.createPlaceholderStub(file.path, file.purpose);
         failed.push(file.path);
       }
     }
     if (failed.length > 0) {
-      console.warn(`[Coder] ${failed.length} file(s) failed and were skipped: ${failed.join(", ")}`);
+      console.warn(`[Coder] ${failed.length} file(s) fell back to stub after retries: ${failed.join(", ")}`);
     }
     return files;
   }
@@ -10337,10 +10662,42 @@ class Orchestrator extends AgentBase {
     }, env);
   }
   // Main entry point — called from API route
-  async start(userRequest, chatId, onProgress) {
+  async start(userRequest, chatId, onProgress, existingProject, forceOverwrite) {
     console.log("\n🧠 Orchestrator starting...");
     console.log(`Request: "${userRequest}"`);
     try {
+      if (existingProject && !forceOverwrite && Object.keys(existingProject.files).length > 0) {
+        console.log("\n🔍 Classifying request against existing project...");
+        try {
+          const classJson = await this.callLLM(
+            EDITOR_CLASSIFICATION_SYSTEM_PROMPT,
+            EDITOR_CLASSIFICATION_USER_PROMPT(userRequest, existingProject.summary),
+            true
+          );
+          const cls = this.parseJson(classJson);
+          console.log(`[Orchestrator] Classification: ${cls.classification} — ${cls.reasoning}`);
+          if (cls.classification === "related-edit") {
+            const { EditorAgent } = await import('./editor.agent-Epdga1F5.js');
+            const editor = new EditorAgent(this.env);
+            const editResult = await editor.run({
+              userRequest,
+              chatId,
+              context: { existingFiles: existingProject.files }
+            });
+            if (!editResult.success) throw new Error(editResult.error || "EditorAgent failed");
+            return { success: true, files: editResult.data };
+          }
+          if (cls.classification === "unrelated-new" || cls.classification === "ambiguous") {
+            return {
+              success: true,
+              needsConfirmation: true,
+              confirmationMessage: "This looks like a different project than what's currently open here. Continuing will replace your current project's files."
+            };
+          }
+        } catch (classErr) {
+          console.warn(`[Orchestrator] Classification failed (${classErr.message}) — proceeding with full pipeline`);
+        }
+      }
       const plan = await this.buildPlan(userRequest);
       console.log(`
 📋 Plan ready — Project: ${plan.projectType}`);
@@ -10507,7 +10864,7 @@ async function getEffectiveUserIdForAgent(request, env) {
 async function action$1({ request, context }) {
   const { query } = await Promise.resolve().then(() => db_server);
   const body = await request.json();
-  const { userRequest, chatId } = body;
+  const { userRequest, chatId, forceOverwrite } = body;
   if (!userRequest || !chatId) {
     return json({
       success: false,
@@ -10519,6 +10876,26 @@ async function action$1({ request, context }) {
   console.log(`Chat: ${chatId}`);
   console.log(`Request: "${userRequest}"`);
   const env = mergeServerEnv(context.cloudflare?.env);
+  let existingProject = null;
+  try {
+    const { getProject } = await Promise.resolve().then(() => db_server);
+    const existing = await getProject(chatId, env);
+    if (existing?.files) {
+      const parsedFiles = typeof existing.files === "string" ? JSON.parse(existing.files) : existing.files;
+      if (Object.keys(parsedFiles).length > 0) {
+        const fileList = Object.keys(parsedFiles).slice(0, 20).join(", ");
+        existingProject = {
+          files: parsedFiles,
+          summary: `Title: "${existing.title}". Files: ${fileList}`
+        };
+        console.log(
+          `[Agent API] Existing project found: "${existing.title}" (${Object.keys(parsedFiles).length} files)`
+        );
+      }
+    }
+  } catch (e) {
+    console.warn("[Agent API] Could not load existing project (non-fatal):", e?.message);
+  }
   try {
     console.log("ENV CHECK:", JSON.stringify(env));
     const orchestrator = new Orchestrator(env);
@@ -10543,8 +10920,16 @@ async function action$1({ request, context }) {
         } catch (e) {
           console.error("Failed to save progress:", e);
         }
-      }
+      },
+      existingProject,
+      forceOverwrite === true
     );
+    if (result.needsConfirmation) {
+      return json({
+        needsConfirmation: true,
+        confirmationMessage: result.confirmationMessage
+      });
+    }
     const filesToSave = result.files && Object.keys(result.files).length > 0 ? result.files : null;
     if (filesToSave) {
       try {
@@ -13216,7 +13601,7 @@ async function newShellProcess(webcontainer, terminal) {
         }
         terminal.write(data);
         try {
-          import('./debugLogger-XrJygLEP.js').then(({ captureTerminalLog }) => {
+          import('./debugLogger-BbEpjNye.js').then(({ captureTerminalLog }) => {
             const cleanData = data.replace(/\x1b\[[0-9;]*[mG]/g, "").trim();
             if (cleanData) {
               captureTerminalLog(cleanData, "output");
@@ -13232,7 +13617,7 @@ async function newShellProcess(webcontainer, terminal) {
     if (isInteractive) {
       input.write(data);
       try {
-        import('./debugLogger-XrJygLEP.js').then(({ captureTerminalLog }) => {
+        import('./debugLogger-BbEpjNye.js').then(({ captureTerminalLog }) => {
           const cleanData = data.replace(/\x1b\[[0-9;]*[A-Z]/g, "").trim();
           if (cleanData && cleanData !== "\r" && cleanData !== "\n") {
             captureTerminalLog(cleanData, "input");
@@ -16299,7 +16684,7 @@ const route42 = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({
   meta
 }, Symbol.toStringTag, { value: 'Module' }));
 
-const serverManifest = {'entry':{'module':'/assets/entry.client-Cy4_-gvi.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes':{'root':{'id':'root','parentId':undefined,'path':'','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/root-tp05465X.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-CQctLlj5.js'],'css':['/assets/root-RetOWtl8.css']},'routes/api.configured-providers':{'id':'routes/api.configured-providers','parentId':'root','path':'api/configured-providers','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.configured-providers-l0sNRNKZ.js','imports':[],'css':[]},'routes/webcontainer.connect.$id':{'id':'routes/webcontainer.connect.$id','parentId':'root','path':'webcontainer/connect/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/webcontainer.connect._id-l0sNRNKZ.js','imports':[],'css':[]},'routes/webcontainer.preview.$id':{'id':'routes/webcontainer.preview.$id','parentId':'root','path':'webcontainer/preview/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/webcontainer.preview._id-Brb4CmdH.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.system.diagnostics':{'id':'routes/api.system.diagnostics','parentId':'root','path':'api/system/diagnostics','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.diagnostics-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.mcp-update-config':{'id':'routes/api.mcp-update-config','parentId':'root','path':'api/mcp-update-config','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.mcp-update-config-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.models.$provider':{'id':'routes/api.models.$provider','parentId':'routes/api.models','path':':provider','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.models._provider-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.system.disk-info':{'id':'routes/api.system.disk-info','parentId':'root','path':'api/system/disk-info','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.disk-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.export-api-keys':{'id':'routes/api.export-api-keys','parentId':'root','path':'api/export-api-keys','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.export-api-keys-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-branches':{'id':'routes/api.github-branches','parentId':'root','path':'api/github-branches','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-branches-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-template':{'id':'routes/api.github-template','parentId':'root','path':'api/github-template','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-template-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.gitlab-branches':{'id':'routes/api.gitlab-branches','parentId':'root','path':'api/gitlab-branches','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.gitlab-branches-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.gitlab-projects':{'id':'routes/api.gitlab-projects','parentId':'root','path':'api/gitlab-projects','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.gitlab-projects-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.system.git-info':{'id':'routes/api.system.git-info','parentId':'root','path':'api/system/git-info','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.git-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.netlify-deploy':{'id':'routes/api.netlify-deploy','parentId':'root','path':'api/netlify-deploy','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.netlify-deploy-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.check-env-key':{'id':'routes/api.check-env-key','parentId':'root','path':'api/check-env-key','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.check-env-key-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.vercel-deploy':{'id':'routes/api.vercel-deploy','parentId':'root','path':'api/vercel-deploy','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.vercel-deploy-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.agent.status':{'id':'routes/api.agent.status','parentId':'routes/api.agent','path':'status','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.agent.status-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-stats':{'id':'routes/api.github-stats','parentId':'root','path':'api/github-stats','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-stats-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.netlify-user':{'id':'routes/api.netlify-user','parentId':'root','path':'api/netlify-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.netlify-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.git-proxy.$':{'id':'routes/api.git-proxy.$','parentId':'root','path':'api/git-proxy/*','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.git-proxy._-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-user':{'id':'routes/api.github-user','parentId':'root','path':'api/github-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.vercel-user':{'id':'routes/api.vercel-user','parentId':'root','path':'api/vercel-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.vercel-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.bug-report':{'id':'routes/api.bug-report','parentId':'root','path':'api/bug-report','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.bug-report-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.web-search':{'id':'routes/api.web-search','parentId':'root','path':'api/web-search','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.web-search-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.mcp-check':{'id':'routes/api.mcp-check','parentId':'root','path':'api/mcp-check','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.mcp-check-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.enhancer':{'id':'routes/api.enhancer','parentId':'root','path':'api/enhancer','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.enhancer-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.git-info':{'id':'routes/api.git-info','parentId':'root','path':'api/git-info','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.git-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.projects':{'id':'routes/api.projects','parentId':'root','path':'api/projects','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.projects-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.llmcall':{'id':'routes/api.llmcall','parentId':'root','path':'api/llmcall','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.llmcall-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.logout':{'id':'routes/auth.logout','parentId':'root','path':'auth/logout','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.logout-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.signup':{'id':'routes/auth.signup','parentId':'root','path':'auth/signup','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.signup-jo4f5nVm.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.health':{'id':'routes/api.health','parentId':'root','path':'api/health','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.health-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.models':{'id':'routes/api.models','parentId':'root','path':'api/models','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.models-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.social':{'id':'routes/api.social','parentId':'root','path':'api/social','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.social-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.update':{'id':'routes/api.update','parentId':'root','path':'api/update','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.update-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.login':{'id':'routes/auth.login','parentId':'root','path':'auth/login','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.login-BoH3eejp.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.agent':{'id':'routes/api.agent','parentId':'root','path':'api/agent','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.agent-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.chat':{'id':'routes/api.chat','parentId':'root','path':'api/chat','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.chat-l0sNRNKZ.js','imports':[],'css':[]},'routes/chat.$id':{'id':'routes/chat.$id','parentId':'root','path':'chat/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/chat._id-DPI_tx7y.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-CQctLlj5.js','/assets/index-CFpP5J6K.js','/assets/mobile-iCfoPXXk.js'],'css':['/assets/index-BJyyulAC.css']},'routes/_index':{'id':'routes/_index','parentId':'root','path':undefined,'index':true,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/_index-CIgR73CX.js','imports':['/assets/chat._id-DPI_tx7y.js','/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-CQctLlj5.js','/assets/index-CFpP5J6K.js','/assets/mobile-iCfoPXXk.js'],'css':['/assets/index-BJyyulAC.css']},'routes/guest':{'id':'routes/guest','parentId':'root','path':'guest','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/guest-DBGZYXN1.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-CQctLlj5.js','/assets/index-CFpP5J6K.js','/assets/mobile-iCfoPXXk.js'],'css':['/assets/index-BJyyulAC.css']},'routes/git':{'id':'routes/git','parentId':'root','path':'git','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/git-DtUm5chA.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-CQctLlj5.js','/assets/index-CFpP5J6K.js','/assets/mobile-iCfoPXXk.js'],'css':['/assets/index-BJyyulAC.css']}},'url':'/assets/manifest-f86d853a.js','version':'f86d853a'};
+const serverManifest = {'entry':{'module':'/assets/entry.client-Cy4_-gvi.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes':{'root':{'id':'root','parentId':undefined,'path':'','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/root-tp05465X.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-CQctLlj5.js'],'css':['/assets/root-RetOWtl8.css']},'routes/api.configured-providers':{'id':'routes/api.configured-providers','parentId':'root','path':'api/configured-providers','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.configured-providers-l0sNRNKZ.js','imports':[],'css':[]},'routes/webcontainer.connect.$id':{'id':'routes/webcontainer.connect.$id','parentId':'root','path':'webcontainer/connect/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/webcontainer.connect._id-l0sNRNKZ.js','imports':[],'css':[]},'routes/webcontainer.preview.$id':{'id':'routes/webcontainer.preview.$id','parentId':'root','path':'webcontainer/preview/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/webcontainer.preview._id-Brb4CmdH.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.system.diagnostics':{'id':'routes/api.system.diagnostics','parentId':'root','path':'api/system/diagnostics','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.diagnostics-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.mcp-update-config':{'id':'routes/api.mcp-update-config','parentId':'root','path':'api/mcp-update-config','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.mcp-update-config-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.models.$provider':{'id':'routes/api.models.$provider','parentId':'routes/api.models','path':':provider','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.models._provider-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.system.disk-info':{'id':'routes/api.system.disk-info','parentId':'root','path':'api/system/disk-info','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.disk-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.export-api-keys':{'id':'routes/api.export-api-keys','parentId':'root','path':'api/export-api-keys','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.export-api-keys-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-branches':{'id':'routes/api.github-branches','parentId':'root','path':'api/github-branches','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-branches-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-template':{'id':'routes/api.github-template','parentId':'root','path':'api/github-template','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-template-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.gitlab-branches':{'id':'routes/api.gitlab-branches','parentId':'root','path':'api/gitlab-branches','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.gitlab-branches-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.gitlab-projects':{'id':'routes/api.gitlab-projects','parentId':'root','path':'api/gitlab-projects','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.gitlab-projects-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.system.git-info':{'id':'routes/api.system.git-info','parentId':'root','path':'api/system/git-info','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.git-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.netlify-deploy':{'id':'routes/api.netlify-deploy','parentId':'root','path':'api/netlify-deploy','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.netlify-deploy-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.check-env-key':{'id':'routes/api.check-env-key','parentId':'root','path':'api/check-env-key','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.check-env-key-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.vercel-deploy':{'id':'routes/api.vercel-deploy','parentId':'root','path':'api/vercel-deploy','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.vercel-deploy-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.agent.status':{'id':'routes/api.agent.status','parentId':'routes/api.agent','path':'status','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.agent.status-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-stats':{'id':'routes/api.github-stats','parentId':'root','path':'api/github-stats','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-stats-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.netlify-user':{'id':'routes/api.netlify-user','parentId':'root','path':'api/netlify-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.netlify-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.git-proxy.$':{'id':'routes/api.git-proxy.$','parentId':'root','path':'api/git-proxy/*','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.git-proxy._-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-user':{'id':'routes/api.github-user','parentId':'root','path':'api/github-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.vercel-user':{'id':'routes/api.vercel-user','parentId':'root','path':'api/vercel-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.vercel-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.bug-report':{'id':'routes/api.bug-report','parentId':'root','path':'api/bug-report','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.bug-report-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.web-search':{'id':'routes/api.web-search','parentId':'root','path':'api/web-search','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.web-search-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.mcp-check':{'id':'routes/api.mcp-check','parentId':'root','path':'api/mcp-check','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.mcp-check-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.enhancer':{'id':'routes/api.enhancer','parentId':'root','path':'api/enhancer','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.enhancer-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.git-info':{'id':'routes/api.git-info','parentId':'root','path':'api/git-info','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.git-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.projects':{'id':'routes/api.projects','parentId':'root','path':'api/projects','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.projects-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.llmcall':{'id':'routes/api.llmcall','parentId':'root','path':'api/llmcall','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.llmcall-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.logout':{'id':'routes/auth.logout','parentId':'root','path':'auth/logout','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.logout-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.signup':{'id':'routes/auth.signup','parentId':'root','path':'auth/signup','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.signup-jo4f5nVm.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.health':{'id':'routes/api.health','parentId':'root','path':'api/health','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.health-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.models':{'id':'routes/api.models','parentId':'root','path':'api/models','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.models-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.social':{'id':'routes/api.social','parentId':'root','path':'api/social','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.social-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.update':{'id':'routes/api.update','parentId':'root','path':'api/update','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.update-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.login':{'id':'routes/auth.login','parentId':'root','path':'auth/login','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.login-BoH3eejp.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.agent':{'id':'routes/api.agent','parentId':'root','path':'api/agent','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.agent-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.chat':{'id':'routes/api.chat','parentId':'root','path':'api/chat','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.chat-l0sNRNKZ.js','imports':[],'css':[]},'routes/chat.$id':{'id':'routes/chat.$id','parentId':'root','path':'chat/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/chat._id-LxIwU0Vx.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-CQctLlj5.js','/assets/index-B9wrbsKF.js','/assets/mobile-iCfoPXXk.js'],'css':['/assets/index-BJyyulAC.css']},'routes/_index':{'id':'routes/_index','parentId':'root','path':undefined,'index':true,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/_index-DLhwur7j.js','imports':['/assets/chat._id-LxIwU0Vx.js','/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-CQctLlj5.js','/assets/index-B9wrbsKF.js','/assets/mobile-iCfoPXXk.js'],'css':['/assets/index-BJyyulAC.css']},'routes/guest':{'id':'routes/guest','parentId':'root','path':'guest','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/guest-C7Q0pKxO.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-CQctLlj5.js','/assets/index-B9wrbsKF.js','/assets/mobile-iCfoPXXk.js'],'css':['/assets/index-BJyyulAC.css']},'routes/git':{'id':'routes/git','parentId':'root','path':'git','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/git-CPMtai21.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-CQctLlj5.js','/assets/index-B9wrbsKF.js','/assets/mobile-iCfoPXXk.js'],'css':['/assets/index-BJyyulAC.css']}},'url':'/assets/manifest-1adaeb70.js','version':'1adaeb70'};
 
 /**
        * `mode` is only relevant for the old Remix compiler but
@@ -16659,4 +17044,4 @@ const serverManifest = {'entry':{'module':'/assets/entry.client-Cy4_-gvi.js','im
         }
       };
 
-export { DEFAULT_MODEL as D, PROVIDER_LIST as P, assetsBuildDirectory as a, basename as b, logs as c, entry as e, future as f, isSpaMode as i, logger$g as l, mode as m, publicPath as p, routes as r, serverManifest as s };
+export { AgentBase as A, DEFAULT_MODEL as D, EDITOR_SYSTEM_PROMPT as E, PROVIDER_LIST as P, EDITOR_USER_PROMPT as a, assetsBuildDirectory as b, basename as c, logs as d, entry as e, future as f, isSpaMode as i, logger$g as l, mode as m, publicPath as p, routes as r, serverManifest as s };
