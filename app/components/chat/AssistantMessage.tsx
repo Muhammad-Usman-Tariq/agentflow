@@ -1,4 +1,4 @@
-import { memo, Fragment } from 'react';
+import { memo, Fragment, useState } from 'react';
 import { Markdown } from './Markdown';
 import type { JSONValue } from 'ai';
 import Popover from '~/components/ui/Popover';
@@ -23,7 +23,8 @@ interface AssistantMessageProps {
   annotations?: JSONValue[];
   messageId?: string;
   onRewind?: (messageId: string) => void;
-  onFork?: (messageId: string) => void;
+  onRefresh?: () => void;
+  onEdit?: (newContent: string) => void;
   append?: (message: Message) => void;
   chatMode?: 'discuss' | 'build';
   setChatMode?: (mode: 'discuss' | 'build') => void;
@@ -65,7 +66,8 @@ export const AssistantMessage = memo(
     annotations,
     messageId,
     onRewind,
-    onFork,
+    onRefresh,
+    onEdit,
     append,
     chatMode,
     setChatMode,
@@ -74,6 +76,9 @@ export const AssistantMessage = memo(
     parts,
     addToolResult,
   }: AssistantMessageProps) => {
+    const [copied, setCopied] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editText, setEditText] = useState('');
     const filteredAnnotations = (annotations?.filter(
       (annotation: JSONValue) =>
         annotation && typeof annotation === 'object' && Object.keys(annotation).includes('type'),
@@ -151,8 +156,8 @@ export const AssistantMessage = memo(
                   Tokens: {usage.totalTokens} (prompt: {usage.promptTokens}, completion: {usage.completionTokens})
                 </div>
               )}
-              {(onRewind || onFork) && messageId && (
-                <div className="flex gap-2 flex-col lg:flex-row ml-auto">
+              {messageId && (
+                <div className="flex gap-2 flex-col lg:flex-row ml-auto items-center">
                   {onRewind && (
                     <WithTooltip tooltip="Revert to this message">
                       <button
@@ -162,29 +167,90 @@ export const AssistantMessage = memo(
                       />
                     </WithTooltip>
                   )}
-                  {onFork && (
-                    <WithTooltip tooltip="Fork chat from this message">
+                  {/* Bug 6: Refresh button — regenerates response */}
+                  {onRefresh && (
+                    <WithTooltip tooltip="Regenerate response">
                       <button
-                        onClick={() => onFork(messageId)}
-                        key="i-ph:git-fork"
-                        className="i-ph:git-fork text-xl text-bolt-elements-textSecondary hover:text-bolt-elements-textPrimary transition-colors"
+                        onClick={() => onRefresh()}
+                        className="i-ph:arrow-clockwise text-xl text-bolt-elements-textSecondary hover:text-bolt-elements-textPrimary transition-colors"
                       />
                     </WithTooltip>
                   )}
+                  {/* Bug 6: Edit button — inline edit + resubmit */}
+                  {onEdit && (
+                    <WithTooltip tooltip="Edit and resubmit">
+                      <button
+                        onClick={() => {
+                          setEditText(content);
+                          setIsEditing(true);
+                        }}
+                        className="i-ph:pencil-simple text-xl text-bolt-elements-textSecondary hover:text-bolt-elements-textPrimary transition-colors"
+                      />
+                    </WithTooltip>
+                  )}
+                  {/* Bug 6: Copy button — same pattern as CodeBlock.tsx */}
+                  <WithTooltip tooltip={copied ? 'Copied!' : 'Copy message'}>
+                    <button
+                      onClick={() => {
+                        if (copied) return;
+                        navigator.clipboard.writeText(content);
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 1500);
+                      }}
+                      className={`text-xl transition-colors ${
+                        copied
+                          ? 'i-ph:check text-green-500'
+                          : 'i-ph:copy text-bolt-elements-textSecondary hover:text-bolt-elements-textPrimary'
+                      }`}
+                    />
+                  </WithTooltip>
                 </div>
               )}
             </div>
           </div>
         </>
-        <Markdown append={append} chatMode={chatMode} setChatMode={setChatMode} model={model} provider={provider} html>
-          {content}
-        </Markdown>
-        {toolInvocations && toolInvocations.length > 0 && (
-          <ToolInvocations
-            toolInvocations={toolInvocations}
-            toolCallAnnotations={toolCallAnnotations}
-            addToolResult={addToolResult}
-          />
+        {/* Bug 6: Edit mode — inline editable textarea */}
+        {isEditing && onEdit ? (
+          <div className="mt-2 flex flex-col gap-2">
+            <textarea
+              className="w-full min-h-[100px] p-3 rounded-lg border border-bolt-elements-borderColor bg-bolt-elements-background-depth-1 text-bolt-elements-textPrimary text-sm resize-y focus:outline-none focus:ring-2 focus:ring-bolt-elements-borderColorActive"
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              autoFocus
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setIsEditing(false)}
+                className="px-3 py-1.5 text-sm rounded-md border border-bolt-elements-borderColor text-bolt-elements-textSecondary hover:text-bolt-elements-textPrimary hover:bg-bolt-elements-background-depth-2 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (editText.trim()) {
+                    onEdit(editText.trim());
+                  }
+                  setIsEditing(false);
+                }}
+                className="px-3 py-1.5 text-sm rounded-md bg-bolt-elements-button-primary-background text-bolt-elements-button-primary-text hover:bg-bolt-elements-button-primary-backgroundHover transition-colors"
+              >
+                Send
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <Markdown append={append} chatMode={chatMode} setChatMode={setChatMode} model={model} provider={provider} html>
+              {content}
+            </Markdown>
+            {toolInvocations && toolInvocations.length > 0 && (
+              <ToolInvocations
+                toolInvocations={toolInvocations}
+                toolCallAnnotations={toolCallAnnotations}
+                addToolResult={addToolResult}
+              />
+            )}
+          </>
         )}
       </div>
     );

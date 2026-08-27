@@ -1,6 +1,24 @@
-﻿import { json, type ActionFunctionArgs } from '@remix-run/cloudflare';
+import { json, type ActionFunctionArgs } from '@remix-run/cloudflare';
 import { Orchestrator } from '~/lib/agents/core/orchestrator';
 import { mergeServerEnv } from '~/lib/.server/llm/utils';
+
+// Mirrors the userId-resolution logic in api.projects.ts so the agent route
+// can persist files server-side without a client round-trip.
+async function getEffectiveUserIdForAgent(request: Request, env: any): Promise<string> {
+  try {
+    const { getUser } = await import('~/lib/auth/session.server');
+    const user = await getUser(request, env);
+    if (user?.userId) return String(user.userId);
+  } catch {}
+
+  const cookieHeader = request.headers.get('Cookie');
+  if (cookieHeader) {
+    const match = cookieHeader.match(/__bolt_guest_id=([^;]+)/);
+    if (match) return decodeURIComponent(match[1]);
+  }
+
+  return `guest_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+}
 
 export async function action({ request, context }: ActionFunctionArgs) {
   const { query } = await import('~/lib/db.server');
@@ -47,6 +65,29 @@ export async function action({ request, context }: ActionFunctionArgs) {
         }
       }
     );
+
+    // ── Bug 1 fix: persist files server-side before HTTP response ─────────────
+    // The client-side storeMessageHistory() can be lost if the tab suspends
+    // between the orchestrator finishing and the client-side fetch completing.
+    // Saving here (server-side, before the response is sent) ensures files are
+    // always in the DB regardless of client-side network state.
+    const filesToSave = result.files && Object.keys(result.files).length > 0 ? result.files : null;
+    if (filesToSave) {
+      try {
+        const { saveProjectForUser } = await import('~/lib/db.server');
+        const userId = await getEffectiveUserIdForAgent(request, env);
+        const title = userRequest.length > 60 ? userRequest.slice(0, 60) + '...' : userRequest;
+        // Messages are intentionally left empty here — the client-side
+        // storeMessageHistory() call owns message persistence. We only
+        // own the files column in this server-side save.
+        await saveProjectForUser(chatId, title, [], filesToSave, userId, env);
+        console.log(`[Agent API] ✅ Files saved to DB server-side: ${Object.keys(filesToSave).length} files for chat_id=${chatId}`);
+      } catch (saveErr: any) {
+        // Non-fatal: log and continue. The client-side save is still a fallback.
+        console.error('[Agent API] ⚠️ Server-side DB save failed (non-fatal):', saveErr?.message);
+      }
+    }
+    // ──────────────────────────────────────────────────────────────────────────
 
     if (!result.success) {
       return json({

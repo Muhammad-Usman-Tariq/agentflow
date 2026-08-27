@@ -703,7 +703,7 @@ export const ChatImpl = memo(
           input={input}
           showChat={showChat}
           chatStarted={chatStarted}
-          isStreaming={isLoading || fakeLoading}
+          isStreaming={isLoading || fakeLoading || agentRunning}
           onStreamingChange={(streaming) => { streamingState.set(streaming); }}
           enhancingPrompt={enhancingPrompt}
           promptEnhanced={promptEnhanced}
@@ -745,6 +745,7 @@ export const ChatImpl = memo(
           chatMode={chatMode}
           setChatMode={setChatMode}
           append={append}
+          reload={reload}
           designScheme={designScheme}
           setDesignScheme={setDesignScheme}
           selectedElement={selectedElement}

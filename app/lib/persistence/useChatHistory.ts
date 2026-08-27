@@ -54,20 +54,47 @@ function extractFilesFromMessages(messages: Message[]): Record<string, { type: '
   for (const message of messages) {
     if (message.role !== 'assistant') continue;
     const content = typeof message.content === 'string' ? message.content : '';
-    if (!content.includes('<boltAction')) continue;
 
-    const actionMatches = content.matchAll(
-      /<boltAction[^>]*type="file"(?:[^>]*filePath="([^"]*)")?[^>]*>([\s\S]*?)<\/boltAction>/g
-    );
-    for (const match of actionMatches) {
-      const [, filePath, fileContent] = match;
-      if (filePath) {
-        const storePath = filePath.replace('/home/project/', '').replace(/^\/+/, '');
-        fileMap[storePath] = {
-          type: 'file',
-          content: fileContent.trim(),
-          isBinary: false,
-        };
+    // ── Path 1: existing <boltAction type="file"> XML format ─────────────────
+    if (content.includes('<boltAction')) {
+      const actionMatches = content.matchAll(
+        /<boltAction[^>]*type="file"(?:[^>]*filePath="([^"]*)")?[^>]*>([\s\S]*?)<\/boltAction>/g
+      );
+      for (const match of actionMatches) {
+        const [, filePath, fileContent] = match;
+        if (filePath) {
+          const storePath = filePath.replace('/home/project/', '').replace(/^\/+/, '');
+          fileMap[storePath] = {
+            type: 'file',
+            content: fileContent.trim(),
+            isBinary: false,
+          };
+        }
+      }
+    }
+
+    // ── Path 2: /api/agent JSON format ────────────────────────────────────────
+    // The server-side agent route returns `{ files: Record<string,string> }`.
+    // When this JSON blob is embedded in an assistant message (e.g. as part of
+    // the run result stored in history), parse it as a second recovery path.
+    if (content.includes('"files"') && content.includes('"fileCount"')) {
+      try {
+        // Extract the first JSON object from the content
+        const jsonMatch = content.match(/\{[\s\S]*"files"\s*:\s*\{[\s\S]*?\}[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          if (parsed.files && typeof parsed.files === 'object') {
+            for (const [rawPath, rawContent] of Object.entries(parsed.files)) {
+              const storePath = String(rawPath).replace(/^\/+/, '');
+              const fileContent = typeof rawContent === 'string' ? rawContent : String(rawContent ?? '');
+              if (storePath && fileContent) {
+                fileMap[storePath] = { type: 'file', content: fileContent, isBinary: false };
+              }
+            }
+          }
+        }
+      } catch {
+        // JSON parse failed — not an agent JSON message, skip silently
       }
     }
   }

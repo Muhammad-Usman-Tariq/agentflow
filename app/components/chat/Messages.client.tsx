@@ -5,7 +5,6 @@ import { AssistantMessage } from './AssistantMessage';
 import { UserMessage } from './UserMessage';
 import { useLocation } from '@remix-run/react';
 import { chatId } from '~/lib/persistence/useChatHistory';
-import { toast } from 'react-toastify';
 import { forwardRef } from 'react';
 import type { ForwardedRef } from 'react';
 import type { ProviderInfo } from '~/types/model';
@@ -16,6 +15,8 @@ interface MessagesProps {
   isStreaming?: boolean;
   messages?: Message[];
   append?: (message: Message) => void;
+  // Bug 6: reload allows the last assistant response to be regenerated
+  reload?: () => void;
   chatMode?: 'discuss' | 'build';
   setChatMode?: (mode: 'discuss' | 'build') => void;
   model?: string;
@@ -34,9 +35,7 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
       window.location.search = searchParams.toString();
     };
 
-      const handleFork = async (messageId: string) => {
-      toast.info('Fork feature coming soon');
-      };
+    // Bug 5: handleFork removed entirely
 
     return (
       <div id={id} className={props.className} ref={ref}>
@@ -67,7 +66,10 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
                         annotations={message.annotations}
                         messageId={messageId}
                         onRewind={handleRewind}
-                        onFork={handleFork}
+                        // Bug 6: Refresh — calls reload() which regenerates the last assistant message
+                        onRefresh={props.reload}
+                        // Bug 6: Edit — appends edited text as a new user message
+                        onEdit={props.append ? (newContent) => props.append!({ role: 'user', content: newContent } as Message) : undefined}
                         append={props.append}
                         chatMode={props.chatMode}
                         setChatMode={props.setChatMode}
@@ -89,3 +91,4 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
     );
   },
 );
+

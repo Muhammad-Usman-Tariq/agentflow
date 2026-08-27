@@ -75,6 +75,8 @@ interface BaseChatProps {
   chatMode?: 'discuss' | 'build';
   setChatMode?: (mode: 'discuss' | 'build') => void;
   append?: (message: Message) => void;
+  // Bug 6: reload allows the last assistant response to be regenerated from the Refresh button
+  reload?: () => void;
   designScheme?: DesignScheme;
   setDesignScheme?: (scheme: DesignScheme) => void;
   selectedElement?: ElementInfo | null;
@@ -121,6 +123,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
       chatMode,
       setChatMode,
       append,
+      reload,
       designScheme,
       setDesignScheme,
       selectedElement,
@@ -377,6 +380,7 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                         messages={messages}
                         isStreaming={isStreaming}
                         append={append}
+                        reload={reload}
                         chatMode={chatMode}
                         setChatMode={setChatMode}
                         provider={provider}

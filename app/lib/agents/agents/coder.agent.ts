@@ -1,4 +1,4 @@
-﻿import { AgentBase } from '../core/agent-base';
+import { AgentBase } from '../core/agent-base';
 import type { AgentInput, AgentOutput } from '../types/agent.types';
 import {
   FRONTEND_CODER_SYSTEM_PROMPT,
@@ -92,9 +92,25 @@ function buildConfigFileTemplates(requirements: any, architecture: any): Record<
     },
   };
 
-  return {
-    'package.json': JSON.stringify(packageJson, null, 2),
-    'vite.config.ts': `import { defineConfig } from 'vite';
+  // ── Bug 3 fix: add /api proxy in vite.config when backend is needed ──────────
+  const viteConfig = needsBackend
+    ? `import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 3000,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
+    },
+  },
+});
+`
+    : `import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
@@ -103,7 +119,12 @@ export default defineConfig({
     port: 3000,
   },
 });
-`,
+`;
+  // ────────────────────────────────────────────────────────────────────────────
+
+  return {
+    'package.json': JSON.stringify(packageJson, null, 2),
+    'vite.config.ts': viteConfig,
     'tsconfig.json': JSON.stringify(
       {
         compilerOptions: {
@@ -161,16 +182,174 @@ export default {
 
 const ENTRY_FILE_PATTERN = /^src\/main\.(tsx|jsx|ts|js)$/;
 
+const ROUTER_USAGE_PATTERN = /(?:<Link|<Route|<BrowserRouter|<HashRouter|useNavigate|useLocation|useParams|<NavLink)[ >/]/;
+
+function usesRouter(files: Record<string, string>): boolean {
+  return Object.values(files).some((content) => ROUTER_USAGE_PATTERN.test(content));
+}
+
+const KNOWN_VERSIONS: Record<string, string> = {
+  'react-icons': '^5.1.0',
+  '@headlessui/react': '^2.1.2',
+  '@mui/material': '^5.15.19',
+  '@mui/icons-material': '^5.15.19',
+  '@emotion/react': '^11.11.4',
+  '@emotion/styled': '^11.11.5',
+  'framer-motion': '^11.1.9',
+  'lucide-react': '^0.378.0',
+  'date-fns': '^3.6.0',
+  'axios': '^1.6.8',
+  'zod': '^3.23.8',
+  'react-hook-form': '^7.51.4',
+  'recharts': '^2.12.7',
+  'chart.js': '^4.4.2',
+  'react-chartjs-2': '^5.2.0',
+  'clsx': '^2.1.1',
+  'class-variance-authority': '^0.7.0',
+  'tailwind-merge': '^2.3.0',
+  '@radix-ui/react-dialog': '^1.1.1',
+  '@radix-ui/react-dropdown-menu': '^2.1.1',
+  '@radix-ui/react-label': '^2.1.0',
+  '@radix-ui/react-slot': '^1.1.0',
+  '@radix-ui/react-toast': '^1.2.1',
+  'react-toastify': '^10.0.5',
+  'react-hot-toast': '^2.4.1',
+  'uuid': '^10.0.0',
+  'nanoid': '^5.0.7',
+  'bcrypt': '^5.1.1',
+  'bcryptjs': '^2.4.3',
+  'jsonwebtoken': '^9.0.2',
+  'socket.io': '^4.7.5',
+  'socket.io-client': '^4.7.5',
+  'multer': '^1.4.5-lts.1',
+  'sharp': '^0.33.3',
+};
+
+function reconcileDependencies(files: Record<string, string>): void {
+  const sourceFiles = Object.entries(files).filter(
+    ([p]) => /\.(ts|tsx|js|jsx|mjs|cjs)$/.test(p) && p !== 'vite.config.ts' && p !== 'postcss.config.js' && p !== 'tailwind.config.js',
+  );
+
+  const detectedPackages = new Set<string>();
+  const importPattern = /^import\s[\s\S]*?['"]([^./][^'"]*)['"];?$/gm;
+  const requirePattern = /require\(['"]((?:@[^/]+\/)?[^/.'"@][^'"]*?)['"]/g;
+
+  for (const [, content] of sourceFiles) {
+    let m: RegExpExecArray | null;
+
+    importPattern.lastIndex = 0;
+    while ((m = importPattern.exec(content)) !== null) {
+      const spec = m[1];
+      const pkgName = spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0];
+      if (pkgName && !pkgName.startsWith('.')) detectedPackages.add(pkgName);
+    }
+
+    requirePattern.lastIndex = 0;
+    while ((m = requirePattern.exec(content)) !== null) {
+      const spec = m[1];
+      const pkgName = spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0];
+      if (pkgName && !pkgName.startsWith('.')) detectedPackages.add(pkgName);
+    }
+  }
+
+  if (!files['package.json']) return;
+  let pkgJson: any;
+  try {
+    pkgJson = JSON.parse(files['package.json']);
+  } catch {
+    return;
+  }
+
+  const allDeclared = new Set([
+    ...Object.keys(pkgJson.dependencies || {}),
+    ...Object.keys(pkgJson.devDependencies || {}),
+  ]);
+
+  const SKIP_PREFIXES = ['node:', 'bun:', 'virtual:', 'vite', 'rollup'];
+  const NODE_BUILTINS = new Set(['path', 'fs', 'os', 'url', 'http', 'https', 'crypto', 'stream', 'buffer', 'util', 'events', 'child_process', 'readline', 'zlib', 'assert', 'process', 'module', 'perf_hooks', 'async_hooks', 'worker_threads', 'cluster']);
+
+  let injected = 0;
+  pkgJson.dependencies = pkgJson.dependencies || {};
+
+  for (const pkg of detectedPackages) {
+    if (allDeclared.has(pkg)) continue;
+    if (NODE_BUILTINS.has(pkg)) continue;
+    if (SKIP_PREFIXES.some((p) => pkg.startsWith(p))) continue;
+
+    const version = KNOWN_VERSIONS[pkg] || '*';
+    pkgJson.dependencies[pkg] = version;
+    injected++;
+    console.log(`[Coder] reconcileDependencies: added missing dep "${pkg}": "${version}"`);
+  }
+
+  if (injected > 0) {
+    files['package.json'] = JSON.stringify(pkgJson, null, 2);
+    console.log(`[Coder] reconcileDependencies: injected ${injected} missing package(s) into package.json`);
+  }
+}
+
 function ensureEntryPoint(files: Record<string, string>, architecture: any): void {
   const hasEntry = Object.keys(files).some((path) => ENTRY_FILE_PATTERN.test(path));
-  if (hasEntry) return;
+  if (hasEntry) {
+    ensureBrowserRouter(files);
+    return;
+  }
 
-  const fileList: Array<{ path: string; purpose: string }> = architecture?.fileStructure || [];
+  const pageFiles = Object.keys(files)
+    .filter((p) => /\/pages\//.test(p) && /\.(tsx|jsx)$/.test(p))
+    .sort();
+
+  const hasCss = Object.keys(files).some((p) => p === 'src/index.css');
+  if (!hasCss) {
+    files['src/index.css'] = '@tailwind base;\n@tailwind components;\n@tailwind utilities;\n';
+  }
 
   const appFile = Object.keys(files).find((p) => /^src\/App\.(tsx|jsx)$/.test(p));
+  if (!appFile && pageFiles.length > 1) {
+    const routeImports: string[] = [];
+    const routeElements: string[] = [];
+
+    for (const pagePath of pageFiles) {
+      const componentName = pagePath.split('/').pop()!.replace(/\.(tsx|jsx)$/, '');
+      const importPath = './' + pagePath.replace(/^src\//, '').replace(/\.(tsx|jsx)$/, '');
+      const routePath = '/' + componentName.toLowerCase().replace(/page$/i, '').replace(/index/i, '') || '/';
+      routeImports.push(`import ${componentName} from '${importPath}';`);
+      routeElements.push(`      <Route path="${routePath}" element={<${componentName} />} />`);
+    }
+
+    files['src/App.tsx'] = `import { Routes, Route } from 'react-router-dom';
+${routeImports.join('\n')}
+
+export default function App() {
+  return (
+    <Routes>
+${routeElements.join('\n')}
+    </Routes>
+  );
+}
+`;
+
+    files['src/main.tsx'] = `import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { BrowserRouter } from 'react-router-dom';
+import App from './App';
+import './index.css';
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
+  </React.StrictMode>,
+);
+`;
+    console.warn(`[Coder] Composed App.tsx with ${pageFiles.length} pages and BrowserRouter-wrapped main.tsx`);
+    return;
+  }
+
   const firstPage =
-    fileList.find((f) => /\/pages\//.test(f.path) && /\.(tsx|jsx)$/.test(f.path))?.path ||
-    Object.keys(files).find((p) => /\/pages\//.test(p) && /\.(tsx|jsx)$/.test(p));
+    architecture?.fileStructure?.find((f: any) => /\/pages\//.test(f.path) && /\.(tsx|jsx)$/.test(f.path))?.path ||
+    pageFiles[0];
 
   const targetPath = appFile || firstPage;
 
@@ -181,25 +360,50 @@ function ensureEntryPoint(files: Record<string, string>, architecture: any): voi
 
   const importPath = './' + targetPath.replace(/^src\//, '').replace(/\.(tsx|jsx)$/, '');
   const componentName = targetPath.split('/').pop()!.replace(/\.(tsx|jsx)$/, '');
-  const hasCss = Object.keys(files).some((p) => p === 'src/index.css');
 
-  if (!hasCss) {
-    files['src/index.css'] = '@tailwind base;\n@tailwind components;\n@tailwind utilities;\n';
-  }
+  const needsRouter = usesRouter(files);
+  const routerImport = needsRouter ? `import { BrowserRouter } from 'react-router-dom';\n` : '';
+  const routerOpen = needsRouter ? '    <BrowserRouter>\n      ' : '    ';
+  const routerClose = needsRouter ? '\n    </BrowserRouter>' : '';
 
   files['src/main.tsx'] = `import React from 'react';
 import ReactDOM from 'react-dom/client';
-import ${componentName} from '${importPath}';
+${routerImport}import ${componentName} from '${importPath}';
 import './index.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <${componentName} />
+${routerOpen}<${componentName} />${routerClose}
   </React.StrictMode>,
 );
 `;
 
-  console.warn(`[Coder] No entry point was generated — added src/main.tsx (rendering ${componentName}) and src/index.css as a fallback`);
+  console.warn(`[Coder] No entry point was generated — added src/main.tsx (rendering ${componentName}${needsRouter ? ' with BrowserRouter' : ''}) and src/index.css as a fallback`);
+}
+
+function ensureBrowserRouter(files: Record<string, string>): void {
+  const mainEntry = Object.keys(files).find((p) => ENTRY_FILE_PATTERN.test(p));
+  if (!mainEntry) return;
+
+  const mainContent = files[mainEntry];
+  if (mainContent.includes('BrowserRouter') || mainContent.includes('HashRouter')) return;
+  if (!usesRouter(files)) return;
+
+  const withRouter = mainContent
+    .replace(
+      /import ReactDOM from ['"](react-dom\/client|react-dom)['"];/,
+      `import ReactDOM from 'react-dom/client';
+import { BrowserRouter } from 'react-router-dom';`,
+    )
+    .replace(
+      /(<React\.StrictMode>)(\s*)(<[A-Z][^/]*\/>)(\s*)(<\/React\.StrictMode>)/,
+      `<React.StrictMode>\n    <BrowserRouter>\n      $3\n    </BrowserRouter>\n  </React.StrictMode>`,
+    );
+
+  if (withRouter !== mainContent) {
+    files[mainEntry] = withRouter;
+    console.warn(`[Coder] ensureBrowserRouter: wrapped existing ${mainEntry} render in <BrowserRouter>`);
+  }
 }
 
 export class CoderAgent extends AgentBase {
@@ -246,6 +450,10 @@ export class CoderAgent extends AgentBase {
       ...dataFiles,
       ...integrationFiles,
     };
+
+    // ── Bug 2 fix: reconcile dependencies before returning ────────────────────
+    reconcileDependencies(allFiles);
+    // ────────────────────────────────────────────────────────────────────────
 
     console.log(`[Coder] Total files generated: ${Object.keys(allFiles).length}`);
     Object.keys(allFiles).forEach((f) => console.log(`  → ${f}`));

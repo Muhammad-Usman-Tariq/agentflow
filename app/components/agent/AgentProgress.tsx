@@ -25,6 +25,13 @@ export default function AgentProgress({ runId, onComplete }: AgentProgressProps)
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [status, setStatus] = useState<'running' | 'done' | 'failed' | 'idle'>('idle');
   const [currentAgent, setCurrentAgent] = useState<string>('');
+  // Bug 4 fix: allow manual dismiss; reset when a new run starts
+  const [dismissed, setDismissed] = useState(false);
+
+  // Reset dismiss state whenever a new run begins so the panel reappears
+  useEffect(() => {
+    if (runId) setDismissed(false);
+  }, [runId]);
 
   useEffect(() => {
     if (!runId) return;
@@ -80,7 +87,7 @@ export default function AgentProgress({ runId, onComplete }: AgentProgressProps)
     };
   }, [runId]);
 
-  if (status === 'idle') return null;
+  if (status === 'idle' || dismissed) return null;
 
   const completedCount = tasks.filter(t => t.status === 'done').length;
   const progressPercent = Math.round((completedCount / 7) * 100);
@@ -94,9 +101,19 @@ export default function AgentProgress({ runId, onComplete }: AgentProgressProps)
           <div className="i-ph:brain-fill text-[#a93011] text-base" />
           <span>AGENT EXECUTION</span>
         </h2>
-        <span className="font-[#JetBrains_Mono,monospace] text-[10px] font-semibold px-2 py-0.5 bg-[#fbf2eb] text-[#a93011] rounded-full">
-          {status === 'running' ? 'RUNNING' : status === 'done' ? 'COMPLETE' : 'FAILED'}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="font-[#JetBrains_Mono,monospace] text-[10px] font-semibold px-2 py-0.5 bg-[#fbf2eb] text-[#a93011] rounded-full">
+            {status === 'running' ? 'RUNNING' : status === 'done' ? 'COMPLETE' : 'FAILED'}
+          </span>
+          {/* Bug 4 fix: dismiss button */}
+          <button
+            onClick={() => setDismissed(true)}
+            title="Dismiss"
+            className="ml-1 w-6 h-6 flex items-center justify-center rounded-full text-[#5f5e5e] hover:text-[#1f1b17] hover:bg-[#e8e4df] transition-colors text-sm leading-none"
+          >
+            ✕
+          </button>
+        </div>
       </div>
 
       {/* Agent list */}
