@@ -65,21 +65,21 @@ const processSampledMessages = createSampler(
     initialMessages: Message[];
     isLoading: boolean;
     parseMessages: (messages: Message[], isLoading: boolean) => void;
-    storeMessageHistory: (messages: Message[], files?: Record<string, any>) => Promise<void>;
+    storeMessageHistory: (messages: Message[], files?: Record<string, any>, skipContainerRead?: boolean) => Promise<void>;
   }) => {
     const { messages, initialMessages, isLoading, parseMessages, storeMessageHistory } = options;
     parseMessages(messages, isLoading);
 
     if (messages.length > initialMessages.length) {
-      storeMessageHistory(messages, workbenchStore.files.get()).catch((error) => toast.error(error.message));
+      storeMessageHistory(messages, workbenchStore.files.get(), true).catch((error) => toast.error(error.message));
     }
   },
-  50,
+  1500,
 );
 
 interface ChatProps {
   initialMessages: Message[];
-  storeMessageHistory: (messages: Message[], files?: Record<string, any>) => Promise<void>;
+  storeMessageHistory: (messages: Message[], files?: Record<string, any>, skipContainerRead?: boolean) => Promise<void>;
   importChat: (description: string, messages: Message[]) => Promise<void>;
   exportChat: () => void;
   description?: string;
@@ -122,6 +122,7 @@ export const ChatImpl = memo(
     // Agent states
     const [agentRunId, setAgentRunId] = useState<number | null>(null);
     const [agentRunning, setAgentRunning] = useState(false);
+    const isAgentRunningRef = useRef(false);
 
     // ⚠️ FIX: holds the message that's waiting for the backend orchestrator (/api/agent)
     // once the main /api/chat stream finishes — see onFinish below. This is what lets us
@@ -232,23 +233,14 @@ export const ChatImpl = memo(
       parseMessages(messages, isLoading);
 
       if (messages.length > initialMessages.length) {
-        // ⚠️ FIX: when isLoading flips to false, parseMessages() (see useMessageParser.ts)
-        // resets the parser and defers the actual artifact/action parse via setTimeout(0)
-        // — that deferred pass is what populates workbenchStore.files for the first time
-        // for actions that only finished right at the very end of a fast/short stream.
-        // Reading workbenchStore.files.get() synchronously right here (same tick) can
-        // capture it BEFORE that population happens, so the DB save goes out with an
-        // empty files object and never gets corrected. Since setTimeout(0) callbacks run
-        // in registration order, scheduling this save in its own setTimeout(0) — right
-        // after calling parseMessages — guarantees it runs after the deferred parse.
-        const persist = () => {
-          storeMessageHistory(messages, workbenchStore.files.get()).catch((error) => toast.error(error.message));
-        };
-
-        if (!isLoading) {
-          setTimeout(persist, 0);
+        if (isLoading) {
+          // While streaming, use 1.5s sampled persistence with container read skipped
+          processSampledMessages({ messages, initialMessages, isLoading, parseMessages, storeMessageHistory });
         } else {
-          persist();
+          // When streaming finishes, save immediately in next tick with full container read
+          setTimeout(() => {
+            storeMessageHistory(messages, workbenchStore.files.get(), false).catch((error) => toast.error(error.message));
+          }, 0);
         }
       }
     }, [messages, isLoading, parseMessages]);
@@ -406,22 +398,26 @@ export const ChatImpl = memo(
 
     // Agent runner
     const runAgent = async (messageContent: string) => {
-      console.log('🔍 runAgent called, agentRunning:', agentRunning, 'chatId:', chatId.get());
+      console.log('🔍 runAgent called, isAgentRunning:', isAgentRunningRef.current, 'chatId:', chatId.get());
 
-      if (agentRunning) return;
+      if (isAgentRunningRef.current) {
+        console.log('🔍 runAgent skipped — an agent run is already in progress');
+        return;
+      }
+
+      isAgentRunningRef.current = true;
+      setAgentRunning(true);
 
       // chatId nahi hai toh naya banao
       let currentChatId = chatId.get();
       if (!currentChatId) {
-      currentChatId = String(Date.now());
-      chatId.set(currentChatId);
-      // ✅ URL update karo taake history save ho
-      const url = new URL(window.location.href);
-      url.pathname = `/chat/${currentChatId}`;
+        currentChatId = String(Date.now());
+        chatId.set(currentChatId);
+        // ✅ URL update karo taake history save ho
+        const url = new URL(window.location.href);
+        url.pathname = `/chat/${currentChatId}`;
         window.history.replaceState({}, '', url);
-        }
-
-      setAgentRunning(true);
+      }
 
       try {
         const res = await fetch('/api/agent', {
@@ -507,25 +503,21 @@ export const ChatImpl = memo(
               devProc.output.pipeTo(
                 new WritableStream({ write(data) { console.log('[agent-dev]', data); } })
               );
-            } else {
-              const serveProc = await container.spawn('npx', ['-y', 'serve', '.', '--listen', '3000']);
-              serveProc.output.pipeTo(
-                new WritableStream({ write(data) { console.log('[agent-serve]', data); } })
-              );
             }
           } catch (e) {
-        console.error('Failed to start dev server:', e);
-      }
+            console.error('Failed to start dev server:', e);
+          }
 
-      // ✅ History save karo agent ke baad
-      await storeMessageHistory(messages, workbenchStore.files.get());
-    }
-  } catch (e) {
-    console.error('Agent error:', e);
-  } finally {
-    setAgentRunning(false);
-  }
-};
+          // ✅ History save after agent completes
+          await storeMessageHistory(messages, workbenchStore.files.get(), false);
+        }
+      } catch (e) {
+        console.error('Agent error:', e);
+      } finally {
+        isAgentRunningRef.current = false;
+        setAgentRunning(false);
+      }
+    };
 
     const sendMessage = async (_event: React.UIEvent, messageInput?: string) => {
       const messageContent = messageInput || input;

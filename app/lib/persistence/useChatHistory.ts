@@ -310,7 +310,7 @@ export function useChatHistory() {
   return {
     ready: !mixedId || ready,
     initialMessages,
-    storeMessageHistory: async (messages: Message[], files?: Record<string, any>) => {
+    storeMessageHistory: async (messages: Message[], files?: Record<string, any>, skipContainerRead: boolean = false) => {
       if (messages.length === 0) return;
 
       messages = messages.filter((m) => !m.annotations?.includes('no-store'));
@@ -342,9 +342,9 @@ export function useChatHistory() {
 
       const title = description.get() || 'Untitled Project';
 
-      // Capture all files from passed argument / workbench store AND WebContainer filesystem
+      // Capture all files from passed argument / workbench store AND WebContainer filesystem (unless skipped mid-stream)
       const storeFiles = files || workbenchStore.files.get() || {};
-      const containerFiles = await readWebContainerFiles();
+      const containerFiles = skipContainerRead ? {} : await readWebContainerFiles();
       const mergedFiles = { ...storeFiles, ...containerFiles };
 
       console.log('[CHAT STORE] Saving:', finalChatId, '| title:', title, '| files count:', Object.keys(mergedFiles).length);
