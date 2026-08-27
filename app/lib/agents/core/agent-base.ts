@@ -1,10 +1,15 @@
-﻿import type { AgentInput, AgentOutput, AgentConfig, IAgent } from '../types/agent.types';
+import type { AgentInput, AgentOutput, AgentConfig, IAgent } from '../types/agent.types';
 
 interface ProviderConfig {
   name: string;
   apiKey: string;
   model: string;
   baseUrl?: string;
+}
+
+export interface CallProviderResult {
+  text: string;
+  finishReason: string | null;
 }
 
 export abstract class AgentBase implements IAgent {
@@ -63,7 +68,8 @@ export abstract class AgentBase implements IAgent {
     systemPrompt: string,
     userMessage: string,
     expectJson: boolean = false,
-    timeoutOverrideMs?: number
+    timeoutOverrideMs?: number,
+    overrideMaxTokens?: number
   ): Promise<string> {
     const providers = this.buildProviderList();
 
@@ -76,11 +82,45 @@ export abstract class AgentBase implements IAgent {
     for (const provider of providers) {
       try {
         console.log(`[${this.config.name}] Trying: ${provider.name} / ${provider.model}`);
-        const text = await this.callProvider(provider, systemPrompt, userMessage, timeoutOverrideMs);
+        let result = await this.callProvider(provider, systemPrompt, userMessage, timeoutOverrideMs, overrideMaxTokens);
+        let accumulatedText = result.text;
+        let finishReason = result.finishReason;
 
-        if (text) {
+        // Auto-continue loop if truncated and expecting JSON or if finishReason === 'length'
+        const MAX_CONTINUATION_ROUNDS = 3;
+        let continuationRound = 0;
+
+        while (
+          continuationRound < MAX_CONTINUATION_ROUNDS &&
+          (finishReason === 'length' || (expectJson && !this.isValidJson(accumulatedText) && finishReason === 'length'))
+        ) {
+          continuationRound++;
+          console.warn(
+            `[${this.config.name}] ⚠️ Truncation detected (finishReason='${finishReason}'). Auto-continuing round ${continuationRound}/${MAX_CONTINUATION_ROUNDS}...`
+          );
+
+          const continuationPrompt = `Your previous response was cut off / truncated. Continue generating from exactly where you stopped. Output ONLY the continuation text — no repetition of what you already wrote, no commentary. Partial output so far:\n${accumulatedText.slice(-800)}`;
+
+          const contResult = await this.callProvider(
+            provider,
+            systemPrompt,
+            continuationPrompt,
+            timeoutOverrideMs,
+            overrideMaxTokens
+          );
+
+          accumulatedText += contResult.text;
+          finishReason = contResult.finishReason;
+
+          if (expectJson && this.isValidJson(accumulatedText)) {
+            console.log(`[${this.config.name}] ✅ Auto-continuation successfully produced valid JSON on round ${continuationRound}`);
+            break;
+          }
+        }
+
+        if (accumulatedText) {
           console.log(`[${this.config.name}] ✅ Success with: ${provider.name}`);
-          return expectJson ? this.extractJson(text) : text;
+          return expectJson ? this.extractJson(accumulatedText) : accumulatedText;
         }
 
       } catch (error: any) {
@@ -91,6 +131,15 @@ export abstract class AgentBase implements IAgent {
     }
 
     throw new Error(`All providers failed. Last error: ${lastError}`);
+  }
+
+  private isValidJson(text: string): boolean {
+    try {
+      this.extractJson(text);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   protected stripCodeFence(text: string): string {
@@ -173,8 +222,9 @@ export abstract class AgentBase implements IAgent {
     provider: ProviderConfig,
     systemPrompt: string,
     userMessage: string,
-    timeoutOverrideMs?: number
-  ): Promise<string> {
+    timeoutOverrideMs?: number,
+    overrideMaxTokens?: number
+  ): Promise<CallProviderResult> {
     const { name, apiKey, model, baseUrl } = provider;
 
     const messages = [
@@ -185,7 +235,8 @@ export abstract class AgentBase implements IAgent {
     const envMaxTokens = this.env?.MAX_COMPLETION_TOKENS
       ? parseInt(this.env.MAX_COMPLETION_TOKENS, 10)
       : (process.env.MAX_COMPLETION_TOKENS ? parseInt(process.env.MAX_COMPLETION_TOKENS, 10) : NaN);
-    const maxTokens = Number.isFinite(envMaxTokens) && envMaxTokens > 0 ? envMaxTokens : 8000;
+    const defaultMaxTokens = Number.isFinite(envMaxTokens) && envMaxTokens > 0 ? envMaxTokens : 8000;
+    const maxTokens = overrideMaxTokens ?? defaultMaxTokens;
 
     let apiUrl = '';
     let headers: Record<string, string> = {
@@ -249,27 +300,36 @@ export abstract class AgentBase implements IAgent {
     const data = await response.json() as any;
 
     let text = '';
+    let finishReason: string | null = null;
     if (name === 'anthropic') {
       text = data.content?.[0]?.text || '';
+      const stopReason = data.stop_reason;
+      finishReason = stopReason === 'max_tokens' ? 'length' : (stopReason ? 'stop' : null);
     } else if (name === 'google') {
       text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      const finishReasonRaw = data.candidates?.[0]?.finishReason;
+      finishReason = finishReasonRaw === 'MAX_TOKENS' ? 'length' : (finishReasonRaw ? 'stop' : null);
     } else {
       text = data.choices?.[0]?.message?.content || '';
+      finishReason = data.choices?.[0]?.finish_reason || null;
     }
 
-    return text;
+    return { text, finishReason };
   }
 
-  private async readSseStream(response: Response): Promise<string> {
+  private async readSseStream(response: Response): Promise<CallProviderResult> {
     const reader = response.body?.getReader();
     if (!reader) {
       const data = await response.json() as any;
-      return data.choices?.[0]?.message?.content || '';
+      const text = data.choices?.[0]?.message?.content || '';
+      const finishReason = data.choices?.[0]?.finish_reason || null;
+      return { text, finishReason };
     }
 
     const decoder = new TextDecoder();
     let buffer = '';
     let fullText = '';
+    let finishReason: string | null = null;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -290,12 +350,15 @@ export abstract class AgentBase implements IAgent {
           const chunk = JSON.parse(payload);
           const delta = chunk.choices?.[0]?.delta?.content;
           if (delta) fullText += delta;
+
+          const reasonChunk = chunk.choices?.[0]?.finish_reason;
+          if (reasonChunk) finishReason = reasonChunk;
         } catch {
         }
       }
     }
 
-    return fullText;
+    return { text: fullText, finishReason };
   }
 
   private autoDetectBaseUrl(providerName: string): string {
