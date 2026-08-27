@@ -1,7 +1,7 @@
 import { convertToCoreMessages, streamText as _streamText, type Message } from 'ai';
 import { MAX_TOKENS, isReasoningModel, type FileMap } from './constants';
 import { getSystemPrompt } from '~/lib/common/prompts/prompts';
-import { DEFAULT_MODEL, DEFAULT_PROVIDER, MODEL_REGEX, MODIFICATIONS_TAG_NAME, PROVIDER_LIST, PROVIDER_REGEX, WORK_DIR } from '~/utils/constants';
+import { MODIFICATIONS_TAG_NAME, WORK_DIR } from '~/utils/constants';
 import type { IProviderSetting } from '~/types/model';
 import { PromptLibrary } from '~/lib/common/prompt-library';
 import { allowedHTMLElements } from '~/utils/markdown';
@@ -76,23 +76,8 @@ export async function streamText(props: {
   let processedMessages = messages.map((message) => {
     const newMessage = { ...message };
     if (message.role === 'user') {
-      const { model: msgModel, provider: msgProvider, content } = extractPropertiesFromMessage(message);
+      const { content } = extractPropertiesFromMessage(message);
       newMessage.content = sanitizeText(content);
-
-      const textContent = Array.isArray(message.content)
-        ? message.content.find((item) => item.type === 'text')?.text || ''
-        : (message.content as string);
-
-      if (MODEL_REGEX.test(textContent) && msgModel) {
-        currentModel = msgModel;
-      }
-      if (PROVIDER_REGEX.test(textContent) && msgProvider) {
-        const foundProvider = PROVIDER_LIST.find((p) => p.name.toLowerCase() === msgProvider.toLowerCase());
-        if (foundProvider) {
-          provider = foundProvider;
-          currentProvider = foundProvider.name;
-        }
-      }
     } else if (message.role === 'assistant') {
       newMessage.content = sanitizeText(message.content as string);
     }

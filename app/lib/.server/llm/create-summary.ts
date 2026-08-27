@@ -1,6 +1,5 @@
 import { generateText, type CoreTool, type GenerateTextResult, type Message } from 'ai';
 import type { IProviderSetting } from '~/types/model';
-import { DEFAULT_MODEL, DEFAULT_PROVIDER, MODEL_REGEX, PROVIDER_LIST, PROVIDER_REGEX } from '~/utils/constants';
 import { extractCurrentContext, extractPropertiesFromMessage, simplifyBoltActions } from './utils';
 import { createScopedLogger } from '~/utils/logger';
 import { LLMManager } from '~/lib/modules/llm/manager';
@@ -21,26 +20,12 @@ export async function createSummary(props: {
   const envAny = serverEnv as any;
   const defaultConfig = resolveLLMConfig(envAny);
 
-  let currentModel = defaultConfig.model;
-  let provider = defaultConfig.provider;
+  const currentModel = defaultConfig.model;
+  const provider = defaultConfig.provider;
 
   const processedMessages = messages.map((message) => {
     if (message.role === 'user') {
-      const { model: msgModel, provider: msgProvider, content } = extractPropertiesFromMessage(message);
-
-      const textContent = Array.isArray(message.content)
-        ? message.content.find((item) => item.type === 'text')?.text || ''
-        : (message.content as string);
-
-      if (MODEL_REGEX.test(textContent) && msgModel) {
-        currentModel = msgModel;
-      }
-      if (PROVIDER_REGEX.test(textContent) && msgProvider) {
-        const foundProvider = PROVIDER_LIST.find((p) => p.name.toLowerCase() === msgProvider.toLowerCase());
-        if (foundProvider) {
-          provider = foundProvider;
-        }
-      }
+      const { content } = extractPropertiesFromMessage(message);
 
       return { ...message, content };
     } else if (message.role == 'assistant') {
