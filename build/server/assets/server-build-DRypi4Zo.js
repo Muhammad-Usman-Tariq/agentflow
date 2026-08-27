@@ -27,9 +27,9 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { z } from 'zod';
 import JSZip from 'jszip';
 import crypto$1 from 'crypto';
+import ignore from 'ignore';
 import { Octokit } from '@octokit/rest';
 import { defaultSchema } from 'rehype-sanitize';
-import ignore from 'ignore';
 import { execSync as execSync$1 } from 'child_process';
 import { existsSync } from 'fs';
 import bcrypt from 'bcryptjs';
@@ -139,7 +139,7 @@ let debugLogger = null;
 const getDebugLogger = () => {
   if (!debugLogger && typeof window !== "undefined") {
     try {
-      import('./debugLogger-0GOE54E8.js').then(({ debugLogger: loggerInstance }) => {
+      import('./debugLogger-DxAmtZ7m.js').then(({ debugLogger: loggerInstance }) => {
         debugLogger = loggerInstance;
       }).catch(() => {
       });
@@ -661,7 +661,7 @@ function App() {
       userAgent: navigator.userAgent,
       timestamp: (/* @__PURE__ */ new Date()).toISOString()
     });
-    import('./debugLogger-0GOE54E8.js').then(({ debugLogger }) => {
+    import('./debugLogger-DxAmtZ7m.js').then(({ debugLogger }) => {
       const status = debugLogger.getStatus();
       logStore.logSystem("Debug logging ready", {
         initialized: status.initialized,
@@ -4235,9 +4235,150 @@ const route16 = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({
   loader: loader$j
 }, Symbol.toStringTag, { value: 'Module' }));
 
+const MAX_TOKENS = 128e3;
+const PROVIDER_COMPLETION_LIMITS = {
+  OpenAI: 4096,
+  // Standard GPT models (o1 models have much higher limits)
+  Github: 4096,
+  // GitHub Models use OpenAI-compatible limits
+  Anthropic: 64e3,
+  // Conservative limit for Claude 4 models (Opus: 32k, Sonnet: 64k)
+  Google: 3e3,
+  // Gemini 1.5 Pro/Flash standard limit
+  Cohere: 4e3,
+  DeepSeek: 3e3,
+  Groq: 8192,
+  HuggingFace: 4096,
+  Mistral: 3e3,
+  Ollama: 3e3,
+  OpenRouter: 3e3,
+  Perplexity: 3e3,
+  Together: 3e3,
+  xAI: 3e3,
+  LMStudio: 3e3,
+  OpenAILike: 3e3,
+  AmazonBedrock: 3e3,
+  Hyperbolic: 3e3
+};
+function isReasoningModel(modelName) {
+  const result = /^(o1|o3|gpt-5)/i.test(modelName);
+  console.log(`REGEX TEST: "${modelName}" matches reasoning pattern: ${result}`);
+  return result;
+}
+const MAX_RESPONSE_SEGMENTS = 2;
+const IGNORE_PATTERNS$1 = [
+  "node_modules/**",
+  ".git/**",
+  "dist/**",
+  "build/**",
+  ".next/**",
+  "coverage/**",
+  ".cache/**",
+  ".vscode/**",
+  ".idea/**",
+  "**/*.log",
+  "**/.DS_Store",
+  "**/npm-debug.log*",
+  "**/yarn-debug.log*",
+  "**/yarn-error.log*",
+  "**/*lock.json",
+  "**/*lock.yml"
+];
+
+function mergeServerEnv(cloudflareEnv) {
+  const fromProcess = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== void 0) fromProcess[key] = value;
+  }
+  const fromCloudflare = {};
+  if (cloudflareEnv) {
+    for (const [key, value] of Object.entries(cloudflareEnv)) {
+      if (value !== void 0) fromCloudflare[key] = value;
+    }
+  }
+  return { ...fromProcess, ...fromCloudflare };
+}
+function extractPropertiesFromMessage(message) {
+  const textContent = Array.isArray(message.content) ? message.content.find((item) => item.type === "text")?.text || "" : message.content;
+  const modelMatch = textContent.match(MODEL_REGEX);
+  const providerMatch = textContent.match(PROVIDER_REGEX);
+  const model = modelMatch ? modelMatch[1] : DEFAULT_MODEL;
+  const provider = providerMatch ? providerMatch[1] : DEFAULT_PROVIDER.name;
+  const cleanedContent = Array.isArray(message.content) ? message.content.map((item) => {
+    if (item.type === "text") {
+      return {
+        type: "text",
+        text: item.text?.replace(MODEL_REGEX, "").replace(PROVIDER_REGEX, "")
+      };
+    }
+    return item;
+  }) : textContent.replace(MODEL_REGEX, "").replace(PROVIDER_REGEX, "");
+  return { model, provider, content: cleanedContent };
+}
+function simplifyBoltActions(input) {
+  const regex = /(<boltAction[^>]*type="file"[^>]*>)([\s\S]*?)(<\/boltAction>)/g;
+  return input.replace(regex, (_0, openingTag, _2, closingTag) => {
+    return `${openingTag}
+          ...
+        ${closingTag}`;
+  });
+}
+function createFilesContext(files, useRelativePath) {
+  const ig = ignore().add(IGNORE_PATTERNS$1);
+  let filePaths = Object.keys(files);
+  filePaths = filePaths.filter((x) => {
+    const relPath = x.replace("/home/project/", "");
+    return !ig.ignores(relPath);
+  });
+  const fileContexts = filePaths.filter((x) => files[x] && files[x].type == "file").map((path) => {
+    const dirent = files[path];
+    if (!dirent || dirent.type == "folder") {
+      return "";
+    }
+    const codeWithLinesNumbers = dirent.content.split("\n").join("\n");
+    let filePath = path;
+    if (useRelativePath) {
+      filePath = path.replace("/home/project/", "");
+    }
+    return `<boltAction type="file" filePath="${filePath}">${codeWithLinesNumbers}</boltAction>`;
+  });
+  return `<boltArtifact id="code-content" title="Code Content" >
+${fileContexts.join("\n")}
+</boltArtifact>`;
+}
+function extractCurrentContext(messages) {
+  const lastAssistantMessage = messages.filter((x) => x.role == "assistant").slice(-1)[0];
+  if (!lastAssistantMessage) {
+    return { summary: void 0, codeContext: void 0 };
+  }
+  let summary;
+  let codeContext;
+  if (!lastAssistantMessage.annotations?.length) {
+    return { summary: void 0, codeContext: void 0 };
+  }
+  for (let i = 0; i < lastAssistantMessage.annotations.length; i++) {
+    const annotation = lastAssistantMessage.annotations[i];
+    if (!annotation || typeof annotation !== "object") {
+      continue;
+    }
+    if (!annotation.type) {
+      continue;
+    }
+    const annotationObject = annotation;
+    if (annotationObject.type === "codeContext") {
+      codeContext = annotationObject;
+      break;
+    } else if (annotationObject.type === "chatSummary") {
+      summary = annotationObject;
+      break;
+    }
+  }
+  return { summary, codeContext };
+}
+
 async function loader$i({ request, context }) {
   const { query } = await Promise.resolve().then(() => db_server);
-  const env = context.cloudflare?.env;
+  const env = mergeServerEnv(context.cloudflare?.env);
   const url = new URL(request.url);
   const runId = url.searchParams.get("runId");
   if (!runId) {
@@ -4255,7 +4396,7 @@ async function loader$i({ request, context }) {
       };
       let lastTaskCount = 0;
       let attempts = 0;
-      const maxAttempts = 120;
+      const maxAttempts = 900;
       const poll = async () => {
         try {
           const runResult = await query(
@@ -5339,56 +5480,6 @@ const route25 = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({
   __proto__: null,
   loader: loader$c
 }, Symbol.toStringTag, { value: 'Module' }));
-
-const MAX_TOKENS = 128e3;
-const PROVIDER_COMPLETION_LIMITS = {
-  OpenAI: 4096,
-  // Standard GPT models (o1 models have much higher limits)
-  Github: 4096,
-  // GitHub Models use OpenAI-compatible limits
-  Anthropic: 64e3,
-  // Conservative limit for Claude 4 models (Opus: 32k, Sonnet: 64k)
-  Google: 3e3,
-  // Gemini 1.5 Pro/Flash standard limit
-  Cohere: 4e3,
-  DeepSeek: 3e3,
-  Groq: 8192,
-  HuggingFace: 4096,
-  Mistral: 3e3,
-  Ollama: 3e3,
-  OpenRouter: 3e3,
-  Perplexity: 3e3,
-  Together: 3e3,
-  xAI: 3e3,
-  LMStudio: 3e3,
-  OpenAILike: 3e3,
-  AmazonBedrock: 3e3,
-  Hyperbolic: 3e3
-};
-function isReasoningModel(modelName) {
-  const result = /^(o1|o3|gpt-5)/i.test(modelName);
-  console.log(`REGEX TEST: "${modelName}" matches reasoning pattern: ${result}`);
-  return result;
-}
-const MAX_RESPONSE_SEGMENTS = 2;
-const IGNORE_PATTERNS$1 = [
-  "node_modules/**",
-  ".git/**",
-  "dist/**",
-  "build/**",
-  ".next/**",
-  "coverage/**",
-  ".cache/**",
-  ".vscode/**",
-  ".idea/**",
-  "**/*.log",
-  "**/.DS_Store",
-  "**/npm-debug.log*",
-  "**/yarn-debug.log*",
-  "**/yarn-error.log*",
-  "**/*lock.json",
-  "**/*lock.yml"
-];
 
 const allowedHTMLElements = [
   "a",
@@ -6864,84 +6955,6 @@ class PromptLibrary {
   }
 }
 
-function extractPropertiesFromMessage(message) {
-  const textContent = Array.isArray(message.content) ? message.content.find((item) => item.type === "text")?.text || "" : message.content;
-  const modelMatch = textContent.match(MODEL_REGEX);
-  const providerMatch = textContent.match(PROVIDER_REGEX);
-  const model = modelMatch ? modelMatch[1] : DEFAULT_MODEL;
-  const provider = providerMatch ? providerMatch[1] : DEFAULT_PROVIDER.name;
-  const cleanedContent = Array.isArray(message.content) ? message.content.map((item) => {
-    if (item.type === "text") {
-      return {
-        type: "text",
-        text: item.text?.replace(MODEL_REGEX, "").replace(PROVIDER_REGEX, "")
-      };
-    }
-    return item;
-  }) : textContent.replace(MODEL_REGEX, "").replace(PROVIDER_REGEX, "");
-  return { model, provider, content: cleanedContent };
-}
-function simplifyBoltActions(input) {
-  const regex = /(<boltAction[^>]*type="file"[^>]*>)([\s\S]*?)(<\/boltAction>)/g;
-  return input.replace(regex, (_0, openingTag, _2, closingTag) => {
-    return `${openingTag}
-          ...
-        ${closingTag}`;
-  });
-}
-function createFilesContext(files, useRelativePath) {
-  const ig = ignore().add(IGNORE_PATTERNS$1);
-  let filePaths = Object.keys(files);
-  filePaths = filePaths.filter((x) => {
-    const relPath = x.replace("/home/project/", "");
-    return !ig.ignores(relPath);
-  });
-  const fileContexts = filePaths.filter((x) => files[x] && files[x].type == "file").map((path) => {
-    const dirent = files[path];
-    if (!dirent || dirent.type == "folder") {
-      return "";
-    }
-    const codeWithLinesNumbers = dirent.content.split("\n").join("\n");
-    let filePath = path;
-    if (useRelativePath) {
-      filePath = path.replace("/home/project/", "");
-    }
-    return `<boltAction type="file" filePath="${filePath}">${codeWithLinesNumbers}</boltAction>`;
-  });
-  return `<boltArtifact id="code-content" title="Code Content" >
-${fileContexts.join("\n")}
-</boltArtifact>`;
-}
-function extractCurrentContext(messages) {
-  const lastAssistantMessage = messages.filter((x) => x.role == "assistant").slice(-1)[0];
-  if (!lastAssistantMessage) {
-    return { summary: void 0, codeContext: void 0 };
-  }
-  let summary;
-  let codeContext;
-  if (!lastAssistantMessage.annotations?.length) {
-    return { summary: void 0, codeContext: void 0 };
-  }
-  for (let i = 0; i < lastAssistantMessage.annotations.length; i++) {
-    const annotation = lastAssistantMessage.annotations[i];
-    if (!annotation || typeof annotation !== "object") {
-      continue;
-    }
-    if (!annotation.type) {
-      continue;
-    }
-    const annotationObject = annotation;
-    if (annotationObject.type === "codeContext") {
-      codeContext = annotationObject;
-      break;
-    } else if (annotationObject.type === "chatSummary") {
-      summary = annotationObject;
-      break;
-    }
-  }
-  return { summary, codeContext };
-}
-
 const discussPrompt = () => `
 # System Prompt for AI Technical Consultant
 
@@ -7184,9 +7197,9 @@ async function streamText(props) {
   } = props;
   const envAny = serverEnv;
   console.log("ENV DUMP:", JSON.stringify(envAny));
-  const currentProvider = envAny?.PROVIDER_NAME || envAny?.["PROVIDER_NAME"] || "";
-  const currentModel = envAny?.DEFAULT_MODEL || DEFAULT_MODEL;
-  const currentApiKey = envAny?.PROVIDER_API_KEY || "";
+  const currentProvider = envAny?.PROVIDER_NAME || process.env.PROVIDER_NAME || "";
+  const currentModel = envAny?.DEFAULT_MODEL || process.env.DEFAULT_MODEL || DEFAULT_MODEL;
+  const currentApiKey = envAny?.PROVIDER_API_KEY || process.env.PROVIDER_API_KEY || "";
   logger$b.info(`Using Provider: ${currentProvider}, Model: ${currentModel}, Key: ${currentApiKey ? "SET" : "MISSING"}`);
   const finalApiKeys = { ...apiKeys };
   if (currentProvider) {
@@ -7259,7 +7272,7 @@ ${props.summary}
     const lockedList = Array.from(effectiveLockedFilePaths).map((f) => `- ${f}`).join("\n");
     systemPrompt = `${systemPrompt}
 
-IMPORTANT: These files are locked — do NOT modify:
+IMPORTANT: These files are locked - do NOT modify:
 ${lockedList}
 ---
 `;
@@ -7578,7 +7591,7 @@ function validateTokenLimits(modelDetails, requestedTokens) {
 }
 async function llmCallAction({ context, request }) {
   const { system, message } = await request.json();
-  const env = context.cloudflare?.env || {};
+  const env = mergeServerEnv(context.cloudflare?.env);
   const model = env.DEFAULT_MODEL;
   const providerName = env.PROVIDER_NAME;
   const provider = { name: providerName };
@@ -7633,7 +7646,7 @@ async function llmCallAction({ context, request }) {
         ],
         model: providerInfo.getModelInstance({
           model: modelDetails.name,
-          serverEnv: context.cloudflare?.env,
+          serverEnv: env,
           apiKeys,
           providerSettings
         }),
@@ -8593,7 +8606,7 @@ class AgentBase {
       error: "Unknown error"
     };
   }
-  async callLLM(systemPrompt, userMessage, expectJson = false) {
+  async callLLM(systemPrompt, userMessage, expectJson = false, timeoutOverrideMs) {
     const providers = this.buildProviderList();
     if (providers.length === 0) {
       throw new Error("No providers configured. Please set PROVIDER_NAME and PROVIDER_API_KEY.");
@@ -8602,7 +8615,7 @@ class AgentBase {
     for (const provider of providers) {
       try {
         console.log(`[${this.config.name}] Trying: ${provider.name} / ${provider.model}`);
-        const text = await this.callProvider(provider, systemPrompt, userMessage);
+        const text = await this.callProvider(provider, systemPrompt, userMessage, timeoutOverrideMs);
         if (text) {
           console.log(`[${this.config.name}] ✅ Success with: ${provider.name}`);
           return expectJson ? this.extractJson(text) : text;
@@ -8614,6 +8627,25 @@ class AgentBase {
       }
     }
     throw new Error(`All providers failed. Last error: ${lastError}`);
+  }
+  stripCodeFence(text) {
+    const stripFence = (s) => s.trim().replace(/^```[a-zA-Z0-9_-]*\r?\n/, "").replace(/\r?\n```\s*$/, "").trim();
+    let cleaned = stripFence(text);
+    const artifactMatch = cleaned.match(/<boltArtifact[^>]*>([\s\S]*)<\/boltArtifact>/i);
+    if (artifactMatch) cleaned = artifactMatch[1].trim();
+    const actionMatch = cleaned.match(/<boltAction[^>]*>([\s\S]*)<\/boltAction>/i);
+    if (actionMatch) cleaned = actionMatch[1].trim();
+    cleaned = cleaned.replace(/^<boltArtifact[^>]*>\s*/i, "").replace(/^<boltAction[^>]*>\s*/i, "").replace(/\s*<\/boltAction>\s*$/i, "").replace(/\s*<\/boltArtifact>\s*$/i, "").trim();
+    cleaned = stripFence(cleaned);
+    return cleaned;
+  }
+  sanitizeFileMap(files) {
+    if (!files) return {};
+    const cleaned = {};
+    for (const [path, content] of Object.entries(files)) {
+      cleaned[path] = typeof content === "string" ? this.stripCodeFence(content) : content;
+    }
+    return cleaned;
   }
   buildProviderList() {
     const providers = [];
@@ -8646,7 +8678,7 @@ class AgentBase {
     }
     return providers;
   }
-  async callProvider(provider, systemPrompt, userMessage) {
+  async callProvider(provider, systemPrompt, userMessage, timeoutOverrideMs) {
     const { name, apiKey, model, baseUrl } = provider;
     const messages = [
       { role: "system", content: systemPrompt },
@@ -8660,6 +8692,7 @@ class AgentBase {
       "Authorization": `Bearer ${apiKey}`
     };
     let bodyPayload = {};
+    let isStreamingRequest = false;
     if (name === "anthropic") {
       apiUrl = "https://api.anthropic.com/v1/messages";
       headers = {
@@ -8684,16 +8717,29 @@ ${userMessage}` }] }]
     } else {
       const detectedUrl = baseUrl || this.autoDetectBaseUrl(name);
       apiUrl = `${detectedUrl}/chat/completions`;
-      bodyPayload = { model, max_tokens: maxTokens, messages };
+      bodyPayload = { model, max_tokens: maxTokens, messages, stream: true };
+      isStreamingRequest = true;
     }
-    const response = await fetch(apiUrl, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(bodyPayload)
-    });
+    const effectiveTimeoutMs = timeoutOverrideMs ?? this.config.timeoutMs;
+    const abortController = new AbortController();
+    const abortTimer = setTimeout(() => abortController.abort(), Math.max(effectiveTimeoutMs - 1e3, 1e3));
+    let response;
+    try {
+      response = await fetch(apiUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(bodyPayload),
+        signal: abortController.signal
+      });
+    } finally {
+      clearTimeout(abortTimer);
+    }
     if (!response.ok) {
       const errText = await response.text();
       throw new Error(`${response.status}: ${errText}`);
+    }
+    if (isStreamingRequest) {
+      return await this.readSseStream(response);
     }
     const data = await response.json();
     let text = "";
@@ -8705,6 +8751,36 @@ ${userMessage}` }] }]
       text = data.choices?.[0]?.message?.content || "";
     }
     return text;
+  }
+  async readSseStream(response) {
+    const reader = response.body?.getReader();
+    if (!reader) {
+      const data = await response.json();
+      return data.choices?.[0]?.message?.content || "";
+    }
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let fullText = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:")) continue;
+        const payload = trimmed.slice(5).trim();
+        if (payload === "[DONE]") continue;
+        try {
+          const chunk = JSON.parse(payload);
+          const delta = chunk.choices?.[0]?.delta?.content;
+          if (delta) fullText += delta;
+        } catch {
+        }
+      }
+    }
+    return fullText;
   }
   autoDetectBaseUrl(providerName) {
     const known = {
@@ -8725,143 +8801,78 @@ ${userMessage}` }] }]
     }
     return known[providerName] || "https://api.openai.com/v1";
   }
-  extractJson(text) {
-    let cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
-    const firstBrace = cleaned.indexOf("{");
-    const firstBracket = cleaned.indexOf("[");
-    let start = -1;
-    if (firstBrace === -1) start = firstBracket;
-    else if (firstBracket === -1) start = firstBrace;
-    else start = Math.min(firstBrace, firstBracket);
-    if (start === -1) throw new Error("No JSON found in LLM response");
-    let end = this.findMatchingJsonEnd(cleaned, start);
-    if (end === -1) {
-      const lastBrace = cleaned.lastIndexOf("}");
-      const lastBracket = cleaned.lastIndexOf("]");
-      end = Math.max(lastBrace, lastBracket);
-    }
-    if (end === -1 || end < start) throw new Error("Invalid JSON in LLM response");
-    cleaned = cleaned.substring(start, end + 1);
-    cleaned = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
-    try {
-      JSON.parse(cleaned);
-      return cleaned;
-    } catch (e1) {
-      try {
-        const repaired = this.repairJsonStrings(cleaned);
-        JSON.parse(repaired);
-        return repaired;
-      } catch (e2) {
-        try {
-          const salvaged = this.salvageTruncatedJson(cleaned);
-          JSON.parse(salvaged);
-          return salvaged;
-        } catch (e3) {
-          throw new Error(`Failed to extract valid JSON from LLM response: ${e1}`);
-        }
-      }
-    }
-  }
-  findMatchingJsonEnd(str, start) {
+  findBalancedJsonSpan(str, start) {
     let depth = 0;
     let inString = false;
-    let isEscaped = false;
+    let escapeNext = false;
     for (let i = start; i < str.length; i++) {
-      const char = str[i];
-      if (isEscaped) {
-        isEscaped = false;
+      const ch = str[i];
+      if (escapeNext) {
+        escapeNext = false;
         continue;
       }
-      if (char === "\\" && inString) {
-        isEscaped = true;
+      if (ch === "\\") {
+        if (inString) escapeNext = true;
         continue;
       }
-      if (char === '"') {
+      if (ch === '"') {
         inString = !inString;
         continue;
       }
-      if (!inString) {
-        if (char === "{" || char === "[") {
-          depth++;
-        } else if (char === "}" || char === "]") {
-          depth--;
-          if (depth === 0) {
-            return i;
-          }
+      if (inString) continue;
+      if (ch === "{" || ch === "[") {
+        depth++;
+      } else if (ch === "}" || ch === "]") {
+        depth--;
+        if (depth === 0) return str.substring(start, i + 1);
+        if (depth < 0) return null;
+      }
+    }
+    return null;
+  }
+  stripJsonComments(jsonCandidate) {
+    let out = jsonCandidate.replace(
+      /("(?:[^"\\]|\\.)*")|(\/\/[^\n]*)/g,
+      (_m, stringLiteral) => stringLiteral !== void 0 ? stringLiteral : ""
+    );
+    out = out.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+    out = out.replace(/,(\s*[}\]])/g, "$1");
+    return out;
+  }
+  extractJson(text) {
+    const cleanedFence = text.replace(/```json\n?/gi, "").replace(/```\n?/g, "").trim();
+    const candidateStarts = [];
+    for (let i = 0; i < cleanedFence.length; i++) {
+      if (cleanedFence[i] === "{" || cleanedFence[i] === "[") candidateStarts.push(i);
+    }
+    for (const start of candidateStarts.slice(0, 25)) {
+      const span = this.findBalancedJsonSpan(cleanedFence, start);
+      if (!span) continue;
+      const candidate = this.stripJsonComments(span);
+      try {
+        JSON.parse(candidate);
+        return candidate;
+      } catch {
+        try {
+          const repaired = candidate.replace(
+            /"((?:[^"\\]|\\.)*)"/g,
+            (_m, p1) => `"${p1.replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t")}"`
+          );
+          JSON.parse(repaired);
+          return repaired;
+        } catch {
+          continue;
         }
       }
     }
-    return -1;
-  }
-  repairJsonStrings(jsonStr) {
-    let result = "";
-    let inString = false;
-    let isEscaped = false;
-    for (let i = 0; i < jsonStr.length; i++) {
-      const char = jsonStr[i];
-      if (isEscaped) {
-        result += char;
-        isEscaped = false;
-        continue;
-      }
-      if (char === "\\" && inString) {
-        result += char;
-        isEscaped = true;
-        continue;
-      }
-      if (char === '"') {
-        inString = !inString;
-        result += char;
-        continue;
-      }
-      if (inString) {
-        if (char === "\n") result += "\\n";
-        else if (char === "\r") result += "\\r";
-        else if (char === "	") result += "\\t";
-        else result += char;
-      } else {
-        result += char;
-      }
-    }
-    return result;
-  }
-  salvageTruncatedJson(jsonStr) {
-    let stack = [];
-    let inString = false;
-    let isEscaped = false;
-    for (let i = 0; i < jsonStr.length; i++) {
-      const char = jsonStr[i];
-      if (isEscaped) {
-        isEscaped = false;
-        continue;
-      }
-      if (char === "\\" && inString) {
-        isEscaped = true;
-        continue;
-      }
-      if (char === '"') {
-        inString = !inString;
-        continue;
-      }
-      if (!inString) {
-        if (char === "{") stack.push("}");
-        else if (char === "[") stack.push("]");
-        else if (char === "}" || char === "]") {
-          if (stack.length > 0 && stack[stack.length - 1] === char) {
-            stack.pop();
-          }
-        }
-      }
-    }
-    let salvaged = jsonStr;
-    if (inString) {
-      salvaged += '"';
-    }
-    salvaged = salvaged.trim().replace(/,\s*$/, "");
-    while (stack.length > 0) {
-      salvaged += stack.pop();
-    }
-    return salvaged;
+    const preview = text.length > 1500 ? `${text.slice(0, 800)}
+...[truncated]...
+${text.slice(-700)}` : text;
+    console.error(`[${this.config.name}] ❌ Could not extract valid JSON. Raw response:
+${preview}`);
+    throw new Error(
+      candidateStarts.length === 0 ? "No JSON found in LLM response" : `Found ${candidateStarts.length} candidate JSON start(s) but none parsed successfully (response likely truncated — consider raising MAX_COMPLETION_TOKENS)`
+    );
   }
   parseJson(jsonString) {
     try {
@@ -9029,6 +9040,13 @@ Decide the database type yourself based on the requirements' data shape:
   flexible/nested/document-shaped, or relationships are shallow.
 Do not default to one blindly — pick whichever genuinely fits this project.
 
+FOLDER CONVENTION (required — the build pipeline splits frontend/backend
+generation by this exact prefix, so it must be followed precisely):
+- ALL backend route handler files go under "server/routes/..."
+- ALL database schema/migration files go under "server/database/..."
+- ALL frontend files (components, pages, config) go under "src/..." or the
+  project root (e.g. "package.json", "index.html", "vite.config.ts").
+
 Return ONLY this JSON:
 {
   "fileStructure": [{"path": "string", "type": "file", "purpose": "string"}],
@@ -9052,8 +9070,8 @@ class ArchitectAgent extends AgentBase {
     super({
       name: "architect",
       maxRetries: 3,
-      timeoutMs: 15e4
-      // ⚠️ was 60000 — now also plans DB schema + API routes, needs more time on a self-hosted backend
+      timeoutMs: 24e4
+      // ⚠️ was 150000 — 150s was cutting it too close (generation was completing successfully, just after the timeout had already fired); now paired with AbortController so a genuine timeout properly cancels instead of leaving the request running
     }, env);
   }
   async execute(input) {
@@ -9137,13 +9155,232 @@ Return ONLY this JSON:
 const BACKEND_CODER_USER_PROMPT = (architecture) => `Build the BACKEND and DATABASE for this project:
 Architecture (apiRoutes/databaseType/databaseSchema — implement these exactly): ${JSON.stringify(architecture)}
 Write ALL backend route files and database schema files described in the architecture. Return JSON only.`;
+const FRONTEND_FILE_SYSTEM_PROMPT = `
+You are an expert frontend developer. Write the complete, working code for
+ONE specific file in a larger project, based on the architecture you're given.
 
+RULES:
+- Output ONLY the raw file content. No JSON, no markdown code fences, no
+  explanation, no "Here is the file" preamble — start directly with the
+  file's actual first character.
+- No placeholders or TODOs — write real, complete, working code.
+- Use Tailwind CSS for styling where relevant, mobile responsive, include
+  reasonable error handling.
+- If this file needs to call a backend API route, use fetch (e.g. fetch('/api/...')).
+- Stay consistent with the full project file list and components list you're
+  given, so imports between files line up correctly.
+`;
+const FRONTEND_FILE_USER_PROMPT = (requirements, architecture, designDecisions, filePath, purpose) => `Project requirements: ${JSON.stringify(requirements)}
+Full project file list (for import consistency — you are only writing ONE of these files right now): ${JSON.stringify(
+  (architecture?.fileStructure || []).map((f) => f.path)
+)}
+Components in this project: ${JSON.stringify(architecture?.components || [])}
+API routes this frontend may call: ${JSON.stringify(architecture?.apiRoutes || [])}
+Design decisions: ${JSON.stringify(designDecisions)}
+
+Write the COMPLETE content of this ONE file:
+Path: ${filePath}
+Purpose: ${purpose}
+
+Output only the raw file content, nothing else.`;
+const BACKEND_FILE_SYSTEM_PROMPT = `
+You are an expert backend developer. Write the complete, working code for ONE
+specific backend or database file in a larger project, based on the
+architecture you're given.
+
+RULES:
+- Output ONLY the raw file content. No JSON, no markdown code fences, no
+  explanation — start directly with the file's actual first character.
+- No placeholders or TODOs — write real, complete, working code.
+- If this is a database schema/migration file, match the given databaseSchema
+  exactly (tables/collections, fields, types, foreign keys/relations).
+- If this is a route handler file, implement the specific apiRoutes it's
+  responsible for, reading/writing via the given databaseSchema.
+`;
+const BACKEND_FILE_USER_PROMPT = (architecture, filePath, purpose) => `Database type: ${architecture?.databaseType}
+Database schema: ${JSON.stringify(architecture?.databaseSchema || [])}
+API routes: ${JSON.stringify(architecture?.apiRoutes || [])}
+Full project file list (for reference): ${JSON.stringify(
+  (architecture?.fileStructure || []).map((f) => f.path)
+)}
+
+Write the COMPLETE content of this ONE file:
+Path: ${filePath}
+Purpose: ${purpose}
+
+Output only the raw file content, nothing else.`;
+
+const BACKEND_PATH_PREFIXES = ["server/", "backend/", "database/", "migrations/"];
+function isBackendPath(path) {
+  const normalized = path.replace(/^\/+/, "");
+  return BACKEND_PATH_PREFIXES.some((p) => normalized.startsWith(p)) || normalized.endsWith(".sql");
+}
+const PER_FILE_TIMEOUT_MS = 15e4;
+const CONFIG_FILE_BASENAMES = /* @__PURE__ */ new Set([
+  "package.json",
+  "vite.config.ts",
+  "vite.config.js",
+  "vite.config.mjs",
+  "tsconfig.json",
+  "tsconfig.node.json",
+  "postcss.config.js",
+  "postcss.config.cjs",
+  "tailwind.config.js",
+  "tailwind.config.cjs",
+  "index.html",
+  ".gitignore"
+]);
+function isConfigFile(path) {
+  const basename = path.replace(/^\/+/, "").split("/").pop() || "";
+  return CONFIG_FILE_BASENAMES.has(basename);
+}
+function slugify(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "app";
+}
+function buildConfigFileTemplates(requirements, architecture) {
+  const projectName = slugify(requirements?.projectName || "digitalsofts-app");
+  const displayTitle = requirements?.projectName || "App";
+  const needsBackend = architecture?.apiRoutes && architecture.apiRoutes.length > 0 || architecture?.databaseSchema && architecture.databaseSchema.length > 0;
+  const packageJson = {
+    name: projectName,
+    version: "0.1.0",
+    private: true,
+    type: "module",
+    scripts: {
+      dev: "vite",
+      build: "vite build",
+      preview: "vite preview",
+      ...needsBackend ? { server: "node server/index.js" } : {}
+    },
+    dependencies: {
+      react: "^18.2.0",
+      "react-dom": "^18.2.0",
+      "react-router-dom": "^6.22.0",
+      ...needsBackend ? {
+        express: "^4.19.2",
+        cors: "^2.8.5",
+        dotenv: "^16.4.5",
+        pg: "^8.11.5"
+      } : {}
+    },
+    devDependencies: {
+      "@types/react": "^18.2.66",
+      "@types/react-dom": "^18.2.22",
+      "@vitejs/plugin-react": "^4.2.1",
+      autoprefixer: "^10.4.19",
+      postcss: "^8.4.38",
+      tailwindcss: "^3.4.3",
+      typescript: "^5.4.5",
+      vite: "^5.2.0"
+    }
+  };
+  return {
+    "package.json": JSON.stringify(packageJson, null, 2),
+    "vite.config.ts": `import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 3000,
+  },
+});
+`,
+    "tsconfig.json": JSON.stringify(
+      {
+        compilerOptions: {
+          target: "ES2020",
+          useDefineForClassFields: true,
+          lib: ["ES2020", "DOM", "DOM.Iterable"],
+          module: "ESNext",
+          skipLibCheck: true,
+          moduleResolution: "bundler",
+          resolveJsonModule: true,
+          isolatedModules: true,
+          noEmit: true,
+          jsx: "react-jsx",
+          strict: false,
+          noUnusedLocals: false,
+          noUnusedParameters: false
+        },
+        include: ["src"]
+      },
+      null,
+      2
+    ),
+    "postcss.config.js": `export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+};
+`,
+    "tailwind.config.js": `/** @type {import('tailwindcss').Config} */
+export default {
+  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+};
+`,
+    "index.html": `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${displayTitle}</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"><\/script>
+  </body>
+</html>
+`,
+    ".gitignore": `node_modules
+dist
+.env
+.env.local
+`
+  };
+}
+const ENTRY_FILE_PATTERN = /^src\/main\.(tsx|jsx|ts|js)$/;
+function ensureEntryPoint(files, architecture) {
+  const hasEntry = Object.keys(files).some((path) => ENTRY_FILE_PATTERN.test(path));
+  if (hasEntry) return;
+  const fileList = architecture?.fileStructure || [];
+  const appFile = Object.keys(files).find((p) => /^src\/App\.(tsx|jsx)$/.test(p));
+  const firstPage = fileList.find((f) => /\/pages\//.test(f.path) && /\.(tsx|jsx)$/.test(f.path))?.path || Object.keys(files).find((p) => /\/pages\//.test(p) && /\.(tsx|jsx)$/.test(p));
+  const targetPath = appFile || firstPage;
+  if (!targetPath) {
+    console.warn("[Coder] Could not find any component to wire up as the entry point — skipping entry-point fallback");
+    return;
+  }
+  const importPath = "./" + targetPath.replace(/^src\//, "").replace(/\.(tsx|jsx)$/, "");
+  const componentName = targetPath.split("/").pop().replace(/\.(tsx|jsx)$/, "");
+  const hasCss = Object.keys(files).some((p) => p === "src/index.css");
+  if (!hasCss) {
+    files["src/index.css"] = "@tailwind base;\n@tailwind components;\n@tailwind utilities;\n";
+  }
+  files["src/main.tsx"] = `import React from 'react';
+import ReactDOM from 'react-dom/client';
+import ${componentName} from '${importPath}';
+import './index.css';
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <${componentName} />
+  </React.StrictMode>,
+);
+`;
+  console.warn(`[Coder] No entry point was generated — added src/main.tsx (rendering ${componentName}) and src/index.css as a fallback`);
+}
 class CoderAgent extends AgentBase {
   constructor(env) {
     super({
       name: "coder",
-      maxRetries: 2,
-      timeoutMs: 24e4
+      maxRetries: 3,
+      timeoutMs: 12e5
     }, env);
   }
   async execute(input) {
@@ -9151,40 +9388,24 @@ class CoderAgent extends AgentBase {
     if (!requirements || !architecture) {
       throw new Error("Coder needs requirements and architecture first");
     }
-    console.log("[Coder] Generating frontend...");
-    const frontendJson = await this.callLLM(
-      FRONTEND_CODER_SYSTEM_PROMPT,
-      FRONTEND_CODER_USER_PROMPT(requirements, architecture, designDecisions),
-      true
-    );
-    const frontendResult = this.parseJson(frontendJson);
-    if (!frontendResult.files || Object.keys(frontendResult.files).length === 0) {
-      throw new Error("Coder returned no frontend files");
-    }
-    let backendFiles = {};
-    const needsBackend = architecture.apiRoutes && architecture.apiRoutes.length > 0 || architecture.databaseSchema && architecture.databaseSchema.length > 0;
-    if (needsBackend) {
-      console.log("[Coder] Generating backend + database...");
-      try {
-        const backendJson = await this.callLLM(
-          BACKEND_CODER_SYSTEM_PROMPT,
-          BACKEND_CODER_USER_PROMPT(architecture),
-          true
-        );
-        const backendResult = this.parseJson(backendJson);
-        backendFiles = backendResult.files || {};
-        console.log(`[Coder] Backend files generated: ${Object.keys(backendFiles).length}`);
-      } catch (error) {
-        console.error("[Coder] Backend generation failed, continuing with frontend only:", error.message);
-      }
+    const fileList = architecture.fileStructure || [];
+    let allGeneratedFiles = {};
+    if (fileList.length > 0) {
+      allGeneratedFiles = await this.generatePerFile(fileList, requirements, architecture, designDecisions);
     } else {
-      console.log("[Coder] Architecture has no apiRoutes/databaseSchema — skipping backend call");
+      console.warn("[Coder] Architecture has no fileStructure — falling back to blob generation");
+      allGeneratedFiles = await this.generateAsBlobsFallback(requirements, architecture, designDecisions);
+    }
+    const configTemplates = buildConfigFileTemplates(requirements, architecture);
+    allGeneratedFiles = { ...allGeneratedFiles, ...configTemplates };
+    ensureEntryPoint(allGeneratedFiles, architecture);
+    if (Object.keys(allGeneratedFiles).length === 0) {
+      throw new Error("Coder generated zero files");
     }
     const dataFiles = input.context?.dataFiles?.dataFiles || {};
     const integrationFiles = input.context?.integrationData?.files || {};
     const allFiles = {
-      ...frontendResult.files,
-      ...backendFiles,
+      ...allGeneratedFiles,
       ...dataFiles,
       ...integrationFiles
     };
@@ -9194,6 +9415,77 @@ class CoderAgent extends AgentBase {
       success: true,
       agentName: "coder",
       data: allFiles
+    };
+  }
+  async generatePerFile(fileList, requirements, architecture, designDecisions) {
+    const files = {};
+    const failed = [];
+    const frontendFiles = fileList.filter((f) => !isBackendPath(f.path) && !isConfigFile(f.path));
+    const backendFiles = fileList.filter((f) => isBackendPath(f.path) && !isConfigFile(f.path));
+    const skippedConfigCount = fileList.length - frontendFiles.length - backendFiles.length;
+    console.log(
+      `[Coder] Generating ${frontendFiles.length} frontend file(s) and ${backendFiles.length} backend/database file(s), one call each` + (skippedConfigCount > 0 ? ` (${skippedConfigCount} config file(s) handled by template, no LLM call needed)` : "") + "..."
+    );
+    for (const file of frontendFiles) {
+      try {
+        console.log(`[Coder] → ${file.path}`);
+        const raw = await this.callLLM(
+          FRONTEND_FILE_SYSTEM_PROMPT,
+          FRONTEND_FILE_USER_PROMPT(requirements, architecture, designDecisions, file.path, file.purpose),
+          false,
+          PER_FILE_TIMEOUT_MS
+        );
+        files[file.path] = this.stripCodeFence(raw);
+      } catch (error) {
+        console.error(`[Coder] ⚠️ Failed to generate ${file.path}, skipping: ${error.message}`);
+        failed.push(file.path);
+      }
+    }
+    for (const file of backendFiles) {
+      try {
+        console.log(`[Coder] → ${file.path}`);
+        const raw = await this.callLLM(
+          BACKEND_FILE_SYSTEM_PROMPT,
+          BACKEND_FILE_USER_PROMPT(architecture, file.path, file.purpose),
+          false,
+          PER_FILE_TIMEOUT_MS
+        );
+        files[file.path] = this.stripCodeFence(raw);
+      } catch (error) {
+        console.error(`[Coder] ⚠️ Failed to generate ${file.path}, skipping: ${error.message}`);
+        failed.push(file.path);
+      }
+    }
+    if (failed.length > 0) {
+      console.warn(`[Coder] ${failed.length} file(s) failed and were skipped: ${failed.join(", ")}`);
+    }
+    return files;
+  }
+  async generateAsBlobsFallback(requirements, architecture, designDecisions) {
+    const frontendJson = await this.callLLM(
+      FRONTEND_CODER_SYSTEM_PROMPT,
+      FRONTEND_CODER_USER_PROMPT(requirements, architecture, designDecisions),
+      true
+    );
+    const frontendResult = this.parseJson(frontendJson);
+    let backendFiles = {};
+    const needsBackend = architecture.apiRoutes && architecture.apiRoutes.length > 0 || architecture.databaseSchema && architecture.databaseSchema.length > 0;
+    if (needsBackend) {
+      try {
+        const backendJson = await this.callLLM(
+          BACKEND_CODER_SYSTEM_PROMPT,
+          BACKEND_CODER_USER_PROMPT(architecture),
+          true
+        );
+        const backendResult = this.parseJson(backendJson);
+        backendFiles = backendResult.files || {};
+      } catch (error) {
+        console.error("[Coder] Backend generation failed, continuing with frontend only:", error.message);
+      }
+    }
+    return {
+      ...this.sanitizeFileMap(frontendResult.files),
+      ...this.sanitizeFileMap(backendFiles)
     };
   }
 }
@@ -9308,6 +9600,10 @@ RULES:
 - Proper categories and tags
 - Realistic pricing
 - No "Lorem ipsum" — write real content
+- The string values inside "dataFiles" must be the raw file content only —
+  never wrap them in <boltArtifact>/<boltAction> tags or markdown code
+  fences; those are for a different format and would end up as literal
+  broken text inside the generated file.
 
 FOR ECOMMERCE — generate:
 - 12 products with name, price, description, image, category, rating
@@ -9342,7 +9638,6 @@ class DataAgent extends AgentBase {
       name: "data",
       maxRetries: 3,
       timeoutMs: 12e4
-      // ⚠️ was 60000 — bumped for self-hosted Qwen backend
     }, env);
   }
   async execute(input) {
@@ -9364,6 +9659,7 @@ Make it look like a real ${requirements.projectType} with actual content.
       true
     );
     const result = this.parseJson(jsonString);
+    result.dataFiles = this.sanitizeFileMap(result.dataFiles);
     console.log(`[Data] Generated data files: ${Object.keys(result.dataFiles || {}).length}`);
     return {
       success: true,
@@ -9706,13 +10002,13 @@ class Orchestrator extends AgentBase {
       await updateRunStatus(runId, "done", void 0, this.env);
       console.log(`
 ✅ Orchestrator done — ${Object.keys(allFiles).length} files generated`);
-      const firstCriticalFailure = failures.find((f) => ["analyst", "architect", "coder"].includes(f.agentName));
+      const coderFailed = failures.some((f) => f.agentName === "coder");
       return {
-        success: !firstCriticalFailure,
+        success: !coderFailed,
         files: allFiles,
         runId,
         ...failures.length > 0 ? { warnings: failures } : {},
-        ...firstCriticalFailure ? { error: `${firstCriticalFailure.agentName.toUpperCase()} agent failed: ${firstCriticalFailure.error}` } : {}
+        ...coderFailed ? { error: `Coder agent failed: ${failures.find((f) => f.agentName === "coder")?.error}` } : {}
       };
     } catch (error) {
       console.error("\n❌ Orchestrator failed:", error.message);
@@ -9731,6 +10027,15 @@ class Orchestrator extends AgentBase {
       true
     );
     const plan = this.parseJson(jsonString);
+    const CORE_AGENTS = ["analyst", "architect", "coder"];
+    const modelPhases = plan.phases || [];
+    const supplementaryPhases = modelPhases.map((p) => ({ ...p, agents: p.agents.filter((a) => !CORE_AGENTS.includes(a)) })).filter((p) => p.agents.length > 0);
+    plan.phases = [
+      { phaseName: "Analysis", executionType: "sequential", agents: ["analyst"] },
+      { phaseName: "Planning", executionType: "sequential", agents: ["architect"] },
+      { phaseName: "Development", executionType: "sequential", agents: ["coder"] },
+      ...supplementaryPhases
+    ];
     return {
       success: true,
       agentName: "orchestrator",
@@ -9815,13 +10120,13 @@ async function action$1({ request, context }) {
 🚀 Agent API called`);
   console.log(`Chat: ${chatId}`);
   console.log(`Request: "${userRequest}"`);
+  const env = mergeServerEnv(context.cloudflare?.env);
   try {
-    console.log("ENV CHECK:", JSON.stringify(context.cloudflare?.env));
-    const orchestrator = new Orchestrator(context.cloudflare?.env);
+    console.log("ENV CHECK:", JSON.stringify(env));
+    const orchestrator = new Orchestrator(env);
     const result = await orchestrator.start(
       userRequest,
       chatId,
-      // Progress callback — saved to DB for SSE to pick up
       async (event) => {
         try {
           await query(
@@ -9835,7 +10140,7 @@ async function action$1({ request, context }) {
               JSON.stringify({ message: event.message }),
               event.data ? JSON.stringify(event.data) : null
             ],
-            context.cloudflare?.env
+            env
           );
         } catch (e) {
           console.error("Failed to save progress:", e);
@@ -9845,7 +10150,11 @@ async function action$1({ request, context }) {
     if (!result.success) {
       return json({
         success: false,
-        error: result.error
+        error: result.error,
+        files: result.files,
+        fileCount: Object.keys(result.files || {}).length,
+        runId: result.runId,
+        warnings: result.warnings
       }, { status: 500 });
     }
     return json({
@@ -9869,11 +10178,12 @@ async function loader$4({ request, context }) {
   if (!runId) {
     return json({ error: "runId required" }, { status: 400 });
   }
+  const env = mergeServerEnv(context.cloudflare?.env);
   try {
     const runResult = await query(
       "SELECT * FROM agent_runs WHERE id = $1",
       [runId],
-      context.cloudflare?.env
+      env
     );
     const tasksResult = await query(
       `SELECT agent_name, status, output, started_at, completed_at 
@@ -9881,7 +10191,7 @@ async function loader$4({ request, context }) {
        WHERE run_id = $1 
        ORDER BY started_at ASC`,
       [runId],
-      context.cloudflare?.env
+      env
     );
     return json({
       run: runResult.rows[0] || null,
@@ -9972,11 +10282,11 @@ async function selectContext(props) {
     return message;
   });
   const envAny = serverEnv;
-  if (currentProvider === DEFAULT_PROVIDER.name && envAny?.PROVIDER_NAME) {
-    currentProvider = envAny.PROVIDER_NAME;
+  if (currentProvider === DEFAULT_PROVIDER.name && (envAny?.PROVIDER_NAME || process.env.PROVIDER_NAME)) {
+    currentProvider = envAny?.PROVIDER_NAME || process.env.PROVIDER_NAME;
   }
-  if (currentModel === DEFAULT_MODEL && envAny?.DEFAULT_MODEL) {
-    currentModel = envAny.DEFAULT_MODEL;
+  if (currentModel === DEFAULT_MODEL && (envAny?.DEFAULT_MODEL || process.env.DEFAULT_MODEL)) {
+    currentModel = envAny?.DEFAULT_MODEL || process.env.DEFAULT_MODEL;
   }
   const provider = PROVIDER_LIST.find((p) => p.name === currentProvider) || DEFAULT_PROVIDER;
   const staticModels = provider.staticModels || [];
@@ -10152,11 +10462,11 @@ async function createSummary(props) {
     return message;
   });
   const envAny = serverEnv;
-  if (currentProvider === DEFAULT_PROVIDER.name && envAny?.PROVIDER_NAME) {
-    currentProvider = envAny.PROVIDER_NAME;
+  if (currentProvider === DEFAULT_PROVIDER.name && (envAny?.PROVIDER_NAME || process.env.PROVIDER_NAME)) {
+    currentProvider = envAny?.PROVIDER_NAME || process.env.PROVIDER_NAME;
   }
-  if (currentModel === DEFAULT_MODEL && envAny?.DEFAULT_MODEL) {
-    currentModel = envAny.DEFAULT_MODEL;
+  if (currentModel === DEFAULT_MODEL && (envAny?.DEFAULT_MODEL || process.env.DEFAULT_MODEL)) {
+    currentModel = envAny?.DEFAULT_MODEL || process.env.DEFAULT_MODEL;
   }
   const provider = PROVIDER_LIST.find((p) => p.name === currentProvider) || DEFAULT_PROVIDER;
   const staticModels = provider.staticModels || [];
@@ -10378,7 +10688,7 @@ async function chatAction({ context, request }) {
     }
   });
   const { messages, files, promptId, contextOptimization, supabase, chatMode, designScheme, maxLLMSteps } = await request.json();
-  const env = context.cloudflare?.env || {};
+  const env = mergeServerEnv(context.cloudflare?.env);
   const providerName = env.PROVIDER_NAME || "";
   const apiKeys = providerName && env.PROVIDER_API_KEY ? { [providerName]: env.PROVIDER_API_KEY } : {};
   const providerSettings = {};
@@ -10418,7 +10728,7 @@ async function chatAction({ context, request }) {
           console.log(`Messages count: ${processedMessages.length}`);
           summary = await createSummary({
             messages: [...processedMessages],
-            env: context.cloudflare?.env,
+            env,
             apiKeys,
             providerSettings,
             promptId,
@@ -10455,7 +10765,7 @@ async function chatAction({ context, request }) {
           console.log(`Messages count: ${processedMessages.length}`);
           filteredFiles = await selectContext({
             messages: [...processedMessages],
-            env: context.cloudflare?.env,
+            env,
             apiKeys,
             files,
             providerSettings,
@@ -10547,7 +10857,7 @@ ${CONTINUE_PROMPT}`
             });
             const result2 = await streamText({
               messages: [...processedMessages],
-              env: context.cloudflare?.env,
+              env,
               options,
               apiKeys,
               files,
@@ -10582,7 +10892,7 @@ ${CONTINUE_PROMPT}`
         });
         const result = await streamText({
           messages: [...processedMessages],
-          env: context.cloudflare?.env,
+          env,
           options,
           apiKeys,
           files,
@@ -12516,7 +12826,7 @@ async function newShellProcess(webcontainer, terminal) {
         }
         terminal.write(data);
         try {
-          import('./debugLogger-0GOE54E8.js').then(({ captureTerminalLog }) => {
+          import('./debugLogger-DxAmtZ7m.js').then(({ captureTerminalLog }) => {
             const cleanData = data.replace(/\x1b\[[0-9;]*[mG]/g, "").trim();
             if (cleanData) {
               captureTerminalLog(cleanData, "output");
@@ -12532,7 +12842,7 @@ async function newShellProcess(webcontainer, terminal) {
     if (isInteractive) {
       input.write(data);
       try {
-        import('./debugLogger-0GOE54E8.js').then(({ captureTerminalLog }) => {
+        import('./debugLogger-DxAmtZ7m.js').then(({ captureTerminalLog }) => {
           const cleanData = data.replace(/\x1b\[[0-9;]*[A-Z]/g, "").trim();
           if (cleanData && cleanData !== "\r" && cleanData !== "\n") {
             captureTerminalLog(cleanData, "input");
@@ -15597,7 +15907,7 @@ const route42 = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({
   meta
 }, Symbol.toStringTag, { value: 'Module' }));
 
-const serverManifest = {'entry':{'module':'/assets/entry.client-Cy4_-gvi.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes':{'root':{'id':'root','parentId':undefined,'path':'','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/root-DGJPxK8W.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-BKcc9JcY.js'],'css':['/assets/root-LKFiIqaT.css']},'routes/api.configured-providers':{'id':'routes/api.configured-providers','parentId':'root','path':'api/configured-providers','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.configured-providers-l0sNRNKZ.js','imports':[],'css':[]},'routes/webcontainer.connect.$id':{'id':'routes/webcontainer.connect.$id','parentId':'root','path':'webcontainer/connect/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/webcontainer.connect._id-l0sNRNKZ.js','imports':[],'css':[]},'routes/webcontainer.preview.$id':{'id':'routes/webcontainer.preview.$id','parentId':'root','path':'webcontainer/preview/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/webcontainer.preview._id-Brb4CmdH.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.system.diagnostics':{'id':'routes/api.system.diagnostics','parentId':'root','path':'api/system/diagnostics','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.diagnostics-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.mcp-update-config':{'id':'routes/api.mcp-update-config','parentId':'root','path':'api/mcp-update-config','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.mcp-update-config-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.models.$provider':{'id':'routes/api.models.$provider','parentId':'routes/api.models','path':':provider','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.models._provider-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.system.disk-info':{'id':'routes/api.system.disk-info','parentId':'root','path':'api/system/disk-info','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.disk-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.export-api-keys':{'id':'routes/api.export-api-keys','parentId':'root','path':'api/export-api-keys','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.export-api-keys-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-branches':{'id':'routes/api.github-branches','parentId':'root','path':'api/github-branches','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-branches-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-template':{'id':'routes/api.github-template','parentId':'root','path':'api/github-template','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-template-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.gitlab-branches':{'id':'routes/api.gitlab-branches','parentId':'root','path':'api/gitlab-branches','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.gitlab-branches-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.gitlab-projects':{'id':'routes/api.gitlab-projects','parentId':'root','path':'api/gitlab-projects','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.gitlab-projects-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.system.git-info':{'id':'routes/api.system.git-info','parentId':'root','path':'api/system/git-info','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.git-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.netlify-deploy':{'id':'routes/api.netlify-deploy','parentId':'root','path':'api/netlify-deploy','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.netlify-deploy-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.check-env-key':{'id':'routes/api.check-env-key','parentId':'root','path':'api/check-env-key','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.check-env-key-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.vercel-deploy':{'id':'routes/api.vercel-deploy','parentId':'root','path':'api/vercel-deploy','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.vercel-deploy-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.agent.status':{'id':'routes/api.agent.status','parentId':'routes/api.agent','path':'status','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.agent.status-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-stats':{'id':'routes/api.github-stats','parentId':'root','path':'api/github-stats','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-stats-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.netlify-user':{'id':'routes/api.netlify-user','parentId':'root','path':'api/netlify-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.netlify-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.git-proxy.$':{'id':'routes/api.git-proxy.$','parentId':'root','path':'api/git-proxy/*','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.git-proxy._-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-user':{'id':'routes/api.github-user','parentId':'root','path':'api/github-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.vercel-user':{'id':'routes/api.vercel-user','parentId':'root','path':'api/vercel-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.vercel-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.bug-report':{'id':'routes/api.bug-report','parentId':'root','path':'api/bug-report','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.bug-report-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.web-search':{'id':'routes/api.web-search','parentId':'root','path':'api/web-search','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.web-search-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.mcp-check':{'id':'routes/api.mcp-check','parentId':'root','path':'api/mcp-check','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.mcp-check-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.enhancer':{'id':'routes/api.enhancer','parentId':'root','path':'api/enhancer','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.enhancer-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.git-info':{'id':'routes/api.git-info','parentId':'root','path':'api/git-info','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.git-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.projects':{'id':'routes/api.projects','parentId':'root','path':'api/projects','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.projects-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.llmcall':{'id':'routes/api.llmcall','parentId':'root','path':'api/llmcall','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.llmcall-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.logout':{'id':'routes/auth.logout','parentId':'root','path':'auth/logout','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.logout-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.signup':{'id':'routes/auth.signup','parentId':'root','path':'auth/signup','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.signup-jo4f5nVm.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.health':{'id':'routes/api.health','parentId':'root','path':'api/health','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.health-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.models':{'id':'routes/api.models','parentId':'root','path':'api/models','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.models-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.social':{'id':'routes/api.social','parentId':'root','path':'api/social','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.social-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.update':{'id':'routes/api.update','parentId':'root','path':'api/update','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.update-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.login':{'id':'routes/auth.login','parentId':'root','path':'auth/login','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.login-BoH3eejp.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.agent':{'id':'routes/api.agent','parentId':'root','path':'api/agent','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.agent-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.chat':{'id':'routes/api.chat','parentId':'root','path':'api/chat','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.chat-l0sNRNKZ.js','imports':[],'css':[]},'routes/chat.$id':{'id':'routes/chat.$id','parentId':'root','path':'chat/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/chat._id-DFif6zuO.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-BKcc9JcY.js','/assets/index-DECHEopG.js','/assets/mobile-B3eqhtUb.js'],'css':['/assets/index-BJyyulAC.css']},'routes/_index':{'id':'routes/_index','parentId':'root','path':undefined,'index':true,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/_index-DHvvA25g.js','imports':['/assets/chat._id-DFif6zuO.js','/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-BKcc9JcY.js','/assets/index-DECHEopG.js','/assets/mobile-B3eqhtUb.js'],'css':['/assets/index-BJyyulAC.css']},'routes/guest':{'id':'routes/guest','parentId':'root','path':'guest','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/guest-Dzq0QX01.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-BKcc9JcY.js','/assets/index-DECHEopG.js','/assets/mobile-B3eqhtUb.js'],'css':['/assets/index-BJyyulAC.css']},'routes/git':{'id':'routes/git','parentId':'root','path':'git','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/git-B6aP3MXu.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-BKcc9JcY.js','/assets/index-DECHEopG.js','/assets/mobile-B3eqhtUb.js'],'css':['/assets/index-BJyyulAC.css']}},'url':'/assets/manifest-b2739c7d.js','version':'b2739c7d'};
+const serverManifest = {'entry':{'module':'/assets/entry.client-Cy4_-gvi.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes':{'root':{'id':'root','parentId':undefined,'path':'','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/root-ufL0GYWx.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-Bu76kaLw.js'],'css':['/assets/root-LKFiIqaT.css']},'routes/api.configured-providers':{'id':'routes/api.configured-providers','parentId':'root','path':'api/configured-providers','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.configured-providers-l0sNRNKZ.js','imports':[],'css':[]},'routes/webcontainer.connect.$id':{'id':'routes/webcontainer.connect.$id','parentId':'root','path':'webcontainer/connect/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/webcontainer.connect._id-l0sNRNKZ.js','imports':[],'css':[]},'routes/webcontainer.preview.$id':{'id':'routes/webcontainer.preview.$id','parentId':'root','path':'webcontainer/preview/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/webcontainer.preview._id-Brb4CmdH.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.system.diagnostics':{'id':'routes/api.system.diagnostics','parentId':'root','path':'api/system/diagnostics','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.diagnostics-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.mcp-update-config':{'id':'routes/api.mcp-update-config','parentId':'root','path':'api/mcp-update-config','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.mcp-update-config-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.models.$provider':{'id':'routes/api.models.$provider','parentId':'routes/api.models','path':':provider','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.models._provider-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.system.disk-info':{'id':'routes/api.system.disk-info','parentId':'root','path':'api/system/disk-info','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.disk-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.export-api-keys':{'id':'routes/api.export-api-keys','parentId':'root','path':'api/export-api-keys','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.export-api-keys-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-branches':{'id':'routes/api.github-branches','parentId':'root','path':'api/github-branches','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-branches-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-template':{'id':'routes/api.github-template','parentId':'root','path':'api/github-template','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-template-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.gitlab-branches':{'id':'routes/api.gitlab-branches','parentId':'root','path':'api/gitlab-branches','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.gitlab-branches-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.gitlab-projects':{'id':'routes/api.gitlab-projects','parentId':'root','path':'api/gitlab-projects','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.gitlab-projects-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.system.git-info':{'id':'routes/api.system.git-info','parentId':'root','path':'api/system/git-info','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.git-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.netlify-deploy':{'id':'routes/api.netlify-deploy','parentId':'root','path':'api/netlify-deploy','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.netlify-deploy-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.check-env-key':{'id':'routes/api.check-env-key','parentId':'root','path':'api/check-env-key','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.check-env-key-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.vercel-deploy':{'id':'routes/api.vercel-deploy','parentId':'root','path':'api/vercel-deploy','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.vercel-deploy-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.agent.status':{'id':'routes/api.agent.status','parentId':'routes/api.agent','path':'status','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.agent.status-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-stats':{'id':'routes/api.github-stats','parentId':'root','path':'api/github-stats','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-stats-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.netlify-user':{'id':'routes/api.netlify-user','parentId':'root','path':'api/netlify-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.netlify-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.git-proxy.$':{'id':'routes/api.git-proxy.$','parentId':'root','path':'api/git-proxy/*','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.git-proxy._-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-user':{'id':'routes/api.github-user','parentId':'root','path':'api/github-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.vercel-user':{'id':'routes/api.vercel-user','parentId':'root','path':'api/vercel-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.vercel-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.bug-report':{'id':'routes/api.bug-report','parentId':'root','path':'api/bug-report','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.bug-report-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.web-search':{'id':'routes/api.web-search','parentId':'root','path':'api/web-search','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.web-search-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.mcp-check':{'id':'routes/api.mcp-check','parentId':'root','path':'api/mcp-check','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.mcp-check-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.enhancer':{'id':'routes/api.enhancer','parentId':'root','path':'api/enhancer','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.enhancer-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.git-info':{'id':'routes/api.git-info','parentId':'root','path':'api/git-info','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.git-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.projects':{'id':'routes/api.projects','parentId':'root','path':'api/projects','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.projects-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.llmcall':{'id':'routes/api.llmcall','parentId':'root','path':'api/llmcall','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.llmcall-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.logout':{'id':'routes/auth.logout','parentId':'root','path':'auth/logout','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.logout-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.signup':{'id':'routes/auth.signup','parentId':'root','path':'auth/signup','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.signup-jo4f5nVm.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.health':{'id':'routes/api.health','parentId':'root','path':'api/health','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.health-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.models':{'id':'routes/api.models','parentId':'root','path':'api/models','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.models-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.social':{'id':'routes/api.social','parentId':'root','path':'api/social','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.social-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.update':{'id':'routes/api.update','parentId':'root','path':'api/update','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.update-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.login':{'id':'routes/auth.login','parentId':'root','path':'auth/login','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.login-BoH3eejp.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.agent':{'id':'routes/api.agent','parentId':'root','path':'api/agent','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.agent-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.chat':{'id':'routes/api.chat','parentId':'root','path':'api/chat','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.chat-l0sNRNKZ.js','imports':[],'css':[]},'routes/chat.$id':{'id':'routes/chat.$id','parentId':'root','path':'chat/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/chat._id-v7UXDGY_.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-Bu76kaLw.js','/assets/index-BkmR48oI.js','/assets/mobile-DADCQPW2.js'],'css':['/assets/index-JX5s8DHR.css']},'routes/_index':{'id':'routes/_index','parentId':'root','path':undefined,'index':true,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/_index-B9nP-YZB.js','imports':['/assets/chat._id-v7UXDGY_.js','/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-Bu76kaLw.js','/assets/index-BkmR48oI.js','/assets/mobile-DADCQPW2.js'],'css':['/assets/index-JX5s8DHR.css']},'routes/guest':{'id':'routes/guest','parentId':'root','path':'guest','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/guest-BwDsQrDH.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-Bu76kaLw.js','/assets/index-BkmR48oI.js','/assets/mobile-DADCQPW2.js'],'css':['/assets/index-JX5s8DHR.css']},'routes/git':{'id':'routes/git','parentId':'root','path':'git','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/git-CLV2TIwG.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-Bu76kaLw.js','/assets/index-BkmR48oI.js','/assets/mobile-DADCQPW2.js'],'css':['/assets/index-JX5s8DHR.css']}},'url':'/assets/manifest-94e7d8b8.js','version':'94e7d8b8'};
 
 /**
        * `mode` is only relevant for the old Remix compiler but

@@ -1,4 +1,4 @@
-import { AgentBase } from '../core/agent-base';
+﻿import { AgentBase } from '../core/agent-base';
 import type { AgentInput, AgentOutput } from '../types/agent.types';
 
 const DATA_SYSTEM_PROMPT = `
@@ -11,6 +11,10 @@ RULES:
 - Proper categories and tags
 - Realistic pricing
 - No "Lorem ipsum" — write real content
+- The string values inside "dataFiles" must be the raw file content only —
+  never wrap them in <boltArtifact>/<boltAction> tags or markdown code
+  fences; those are for a different format and would end up as literal
+  broken text inside the generated file.
 
 FOR ECOMMERCE — generate:
 - 12 products with name, price, description, image, category, rating
@@ -45,7 +49,7 @@ export class DataAgent extends AgentBase {
   super({
     name: 'data',
     maxRetries: 3,
-    timeoutMs: 120000, // ⚠️ was 60000 — bumped for self-hosted Qwen backend
+    timeoutMs: 120000,
   }, env);
 }
 
@@ -72,6 +76,8 @@ Make it look like a real ${requirements.projectType} with actual content.
     );
 
     const result = this.parseJson<any>(jsonString);
+
+    result.dataFiles = this.sanitizeFileMap(result.dataFiles);
 
     console.log(`[Data] Generated data files: ${Object.keys(result.dataFiles || {}).length}`);
 

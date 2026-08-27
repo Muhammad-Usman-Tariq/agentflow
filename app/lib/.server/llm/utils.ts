@@ -1,8 +1,24 @@
-import { type Message } from 'ai';
+﻿import { type Message } from 'ai';
 import { DEFAULT_MODEL, DEFAULT_PROVIDER, MODEL_REGEX, PROVIDER_REGEX } from '~/utils/constants';
 import { IGNORE_PATTERNS, type FileMap } from './constants';
 import ignore from 'ignore';
 import type { ContextAnnotation } from '~/types/context';
+
+export function mergeServerEnv(cloudflareEnv?: Record<string, string | undefined> | null): Record<string, string> {
+  const fromProcess: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) fromProcess[key] = value;
+  }
+
+  const fromCloudflare: Record<string, string> = {};
+  if (cloudflareEnv) {
+    for (const [key, value] of Object.entries(cloudflareEnv)) {
+      if (value !== undefined) fromCloudflare[key] = value;
+    }
+  }
+
+  return { ...fromProcess, ...fromCloudflare };
+}
 
 export function extractPropertiesFromMessage(message: Omit<Message, 'id'>): {
   model: string;
@@ -16,16 +32,8 @@ export function extractPropertiesFromMessage(message: Omit<Message, 'id'>): {
   const modelMatch = textContent.match(MODEL_REGEX);
   const providerMatch = textContent.match(PROVIDER_REGEX);
 
-  /*
-   * Extract model
-   * const modelMatch = message.content.match(MODEL_REGEX);
-   */
   const model = modelMatch ? modelMatch[1] : DEFAULT_MODEL;
 
-  /*
-   * Extract provider
-   * const providerMatch = message.content.match(PROVIDER_REGEX);
-   */
   const provider = providerMatch ? providerMatch[1] : DEFAULT_PROVIDER.name;
 
   const cleanedContent = Array.isArray(message.content)
@@ -37,7 +45,7 @@ export function extractPropertiesFromMessage(message: Omit<Message, 'id'>): {
           };
         }
 
-        return item; // Preserve image_url and other types as is
+        return item;
       })
     : textContent.replace(MODEL_REGEX, '').replace(PROVIDER_REGEX, '');
 
@@ -45,10 +53,8 @@ export function extractPropertiesFromMessage(message: Omit<Message, 'id'>): {
 }
 
 export function simplifyBoltActions(input: string): string {
-  // Using regex to match boltAction tags that have type="file"
   const regex = /(<boltAction[^>]*type="file"[^>]*>)([\s\S]*?)(<\/boltAction>)/g;
 
-  // Replace each matching occurrence
   return input.replace(regex, (_0, openingTag, _2, closingTag) => {
     return `${openingTag}\n          ...\n        ${closingTag}`;
   });
@@ -73,7 +79,6 @@ export function createFilesContext(files: FileMap, useRelativePath?: boolean) {
 
       const codeWithLinesNumbers = dirent.content
         .split('\n')
-        // .map((v, i) => `${i + 1}|${v}`)
         .join('\n');
 
       let filePath = path;

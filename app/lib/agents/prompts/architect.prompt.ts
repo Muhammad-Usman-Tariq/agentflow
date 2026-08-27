@@ -9,6 +9,13 @@ Decide the database type yourself based on the requirements' data shape:
   flexible/nested/document-shaped, or relationships are shallow.
 Do not default to one blindly — pick whichever genuinely fits this project.
 
+FOLDER CONVENTION (required — the build pipeline splits frontend/backend
+generation by this exact prefix, so it must be followed precisely):
+- ALL backend route handler files go under "server/routes/..."
+- ALL database schema/migration files go under "server/database/..."
+- ALL frontend files (components, pages, config) go under "src/..." or the
+  project root (e.g. "package.json", "index.html", "vite.config.ts").
+
 Return ONLY this JSON:
 {
   "fileStructure": [{"path": "string", "type": "file", "purpose": "string"}],

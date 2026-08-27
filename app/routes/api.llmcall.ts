@@ -1,4 +1,4 @@
-import { type ActionFunctionArgs } from '@remix-run/cloudflare';
+﻿import { type ActionFunctionArgs } from '@remix-run/cloudflare';
 import { streamText } from '~/lib/.server/llm/stream-text';
 import type { IProviderSetting, ProviderInfo } from '~/types/model';
 import { generateText } from 'ai';
@@ -7,6 +7,7 @@ import { MAX_TOKENS, PROVIDER_COMPLETION_LIMITS, isReasoningModel } from '~/lib/
 import { LLMManager } from '~/lib/modules/llm/manager';
 import type { ModelInfo } from '~/lib/modules/llm/types';
 import { createScopedLogger } from '~/utils/logger';
+import { mergeServerEnv } from '~/lib/.server/llm/utils';
 
 export async function action(args: ActionFunctionArgs) {
   return llmCallAction(args);
@@ -64,7 +65,7 @@ function validateTokenLimits(modelDetails: ModelInfo, requestedTokens: number): 
 }
 
 async function llmCallAction({ context, request }: ActionFunctionArgs) {
-  // ⚠️ FIX: no cookies, no client-supplied model/provider — this route (used only by
+  // âš ï¸ FIX: no cookies, no client-supplied model/provider â€” this route (used only by
   // selectStarterTemplate for auto template selection) now depends on .env exclusively,
   // same as api.chat.ts. There is no UI for the user to pick a model, so honoring
   // client input or cookies here could only ever cause bugs, never help. `system` and
@@ -79,7 +80,7 @@ async function llmCallAction({ context, request }: ActionFunctionArgs) {
   }>();
   const streamOutput = false; // this route's only caller (selectStarterTemplate) never streams
 
-  const env = (context.cloudflare?.env as unknown) as Record<string, string> || {};
+  const env = mergeServerEnv(context.cloudflare?.env as unknown as Record<string, string | undefined> | undefined);
 
   const model = env.DEFAULT_MODEL;
   const providerName = env.PROVIDER_NAME;
@@ -115,7 +116,7 @@ async function llmCallAction({ context, request }: ActionFunctionArgs) {
             content: `${message}`,
           },
         ],
-        env: context.cloudflare?.env as any,
+        env,
         apiKeys,
         providerSettings,
       });
@@ -208,7 +209,7 @@ async function llmCallAction({ context, request }: ActionFunctionArgs) {
         ],
         model: providerInfo.getModelInstance({
           model: modelDetails.name,
-          serverEnv: context.cloudflare?.env as any,
+          serverEnv: env,
           apiKeys,
           providerSettings,
         }),

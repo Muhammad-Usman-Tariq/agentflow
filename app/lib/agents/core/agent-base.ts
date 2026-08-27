@@ -1,4 +1,4 @@
-import type { AgentInput, AgentOutput, AgentConfig, IAgent } from '../types/agent.types';
+﻿import type { AgentInput, AgentOutput, AgentConfig, IAgent } from '../types/agent.types';
 
 interface ProviderConfig {
   name: string;
@@ -62,7 +62,8 @@ export abstract class AgentBase implements IAgent {
   protected async callLLM(
     systemPrompt: string,
     userMessage: string,
-    expectJson: boolean = false
+    expectJson: boolean = false,
+    timeoutOverrideMs?: number
   ): Promise<string> {
     const providers = this.buildProviderList();
 
@@ -75,7 +76,7 @@ export abstract class AgentBase implements IAgent {
     for (const provider of providers) {
       try {
         console.log(`[${this.config.name}] Trying: ${provider.name} / ${provider.model}`);
-        const text = await this.callProvider(provider, systemPrompt, userMessage);
+        const text = await this.callProvider(provider, systemPrompt, userMessage, timeoutOverrideMs);
 
         if (text) {
           console.log(`[${this.config.name}] ✅ Success with: ${provider.name}`);
@@ -92,6 +93,43 @@ export abstract class AgentBase implements IAgent {
     throw new Error(`All providers failed. Last error: ${lastError}`);
   }
 
+  protected stripCodeFence(text: string): string {
+    const stripFence = (s: string): string =>
+      s
+        .trim()
+        .replace(/^```[a-zA-Z0-9_-]*\r?\n/, '')
+        .replace(/\r?\n```\s*$/, '')
+        .trim();
+
+    let cleaned = stripFence(text);
+
+    const artifactMatch = cleaned.match(/<boltArtifact[^>]*>([\s\S]*)<\/boltArtifact>/i);
+    if (artifactMatch) cleaned = artifactMatch[1].trim();
+
+    const actionMatch = cleaned.match(/<boltAction[^>]*>([\s\S]*)<\/boltAction>/i);
+    if (actionMatch) cleaned = actionMatch[1].trim();
+
+    cleaned = cleaned
+      .replace(/^<boltArtifact[^>]*>\s*/i, '')
+      .replace(/^<boltAction[^>]*>\s*/i, '')
+      .replace(/\s*<\/boltAction>\s*$/i, '')
+      .replace(/\s*<\/boltArtifact>\s*$/i, '')
+      .trim();
+
+    cleaned = stripFence(cleaned);
+
+    return cleaned;
+  }
+
+  protected sanitizeFileMap(files: Record<string, string> | undefined | null): Record<string, string> {
+    if (!files) return {};
+    const cleaned: Record<string, string> = {};
+    for (const [path, content] of Object.entries(files)) {
+      cleaned[path] = typeof content === 'string' ? this.stripCodeFence(content) : (content as any);
+    }
+    return cleaned;
+  }
+
   private buildProviderList(): ProviderConfig[] {
     const providers: ProviderConfig[] = [];
     const e = this.env;
@@ -99,13 +137,6 @@ export abstract class AgentBase implements IAgent {
     const name = e.PROVIDER_NAME || process.env.PROVIDER_NAME;
     const apiKey = e.PROVIDER_API_KEY || process.env.PROVIDER_API_KEY;
     const model = e.DEFAULT_MODEL || process.env.DEFAULT_MODEL || '';
-    // ⚠️ FIX: this used to only check PROVIDER_BASE_URL, which was never the
-    // actual configured variable name — the app-wide convention (used by
-    // OpenAILikeProvider elsewhere) is OPENAI_LIKE_API_BASE_URL. Because this
-    // always read as undefined, callProvider() fell through to
-    // autoDetectBaseUrl('openailike'), which isn't in its known-providers map
-    // either, so it silently defaulted to the REAL OpenAI API — sending our
-    // local Colab API key there and getting a 401.
     const baseUrl =
       e.OPENAI_LIKE_API_BASE_URL || process.env.OPENAI_LIKE_API_BASE_URL ||
       e.PROVIDER_BASE_URL || process.env.PROVIDER_BASE_URL;
@@ -141,7 +172,8 @@ export abstract class AgentBase implements IAgent {
   private async callProvider(
     provider: ProviderConfig,
     systemPrompt: string,
-    userMessage: string
+    userMessage: string,
+    timeoutOverrideMs?: number
   ): Promise<string> {
     const { name, apiKey, model, baseUrl } = provider;
 
@@ -150,12 +182,6 @@ export abstract class AgentBase implements IAgent {
       { role: 'user', content: userMessage },
     ];
 
-    // ⚠️ FIX: was hardcoded to 8000 everywhere, ignoring MAX_COMPLETION_TOKENS
-    // — the same env var stream-text.ts already reads for the main chat path.
-    // This is the reason the coder agent kept truncating: a self-hosted small
-    // model needs a different budget than a fast cloud API, and there was no
-    // way to configure it without editing code. Now it follows the same
-    // .env-driven convention as the rest of the app.
     const envMaxTokens = this.env?.MAX_COMPLETION_TOKENS
       ? parseInt(this.env.MAX_COMPLETION_TOKENS, 10)
       : (process.env.MAX_COMPLETION_TOKENS ? parseInt(process.env.MAX_COMPLETION_TOKENS, 10) : NaN);
@@ -167,16 +193,6 @@ export abstract class AgentBase implements IAgent {
       'Authorization': `Bearer ${apiKey}`,
     };
     let bodyPayload: any = {};
-    // ⚠️ FIX: Cloudflare (non-Enterprise plans) hard-kills any proxied,
-    // NON-STREAMING HTTP request/response after ~100 seconds with a 524
-    // error — regardless of any timeoutMs we configure in our own JS code.
-    // Our self-hosted Kaggle/Qwen backend regularly takes longer than that
-    // for a single call. Streaming (SSE) responses aren't subject to the
-    // same hard cutoff as long as data keeps flowing, so OpenAI-compatible
-    // calls (our own backend, Groq, OpenRouter, etc.) now request
-    // stream: true and are parsed as SSE, same as the main /api/chat path
-    // already does. This directly fixes the ARCHITECT/CODER/etc. "524:
-    // error code: 524" failures.
     let isStreamingRequest = false;
 
     if (name === 'anthropic') {
@@ -205,20 +221,9 @@ export abstract class AgentBase implements IAgent {
       isStreamingRequest = true;
     }
 
-    // ⚠️ FIX: previously, when AgentBase.run()'s outer timeout fired, we
-    // simply stopped WAITING for this fetch — we never actually cancelled
-    // it. The request kept running on the (single, shared) Colab GPU in
-    // the background, and the very next retry fired a BRAND NEW request on
-    // top of it. Each retry stacked more concurrent load onto the same
-    // GPU, making every subsequent attempt slower than the last — a
-    // self-worsening cycle that guaranteed all 3 retries would eventually
-    // time out, even though the model was genuinely completing the work
-    // each time (just slightly too slowly). An AbortController tied to the
-    // same timeout budget ensures a timed-out request is actually
-    // cancelled, freeing the GPU for the next attempt instead of
-    // competing with it.
+    const effectiveTimeoutMs = timeoutOverrideMs ?? this.config.timeoutMs;
     const abortController = new AbortController();
-    const abortTimer = setTimeout(() => abortController.abort(), Math.max(this.config.timeoutMs - 1000, 1000));
+    const abortTimer = setTimeout(() => abortController.abort(), Math.max(effectiveTimeoutMs - 1000, 1000));
 
     let response: Response;
     try {
@@ -255,14 +260,9 @@ export abstract class AgentBase implements IAgent {
     return text;
   }
 
-  // Read an OpenAI-compatible SSE stream (data: {...}\n\n chunks, ending in
-  // "data: [DONE]") and assemble it into the full completion text, the same
-  // shape callProvider's non-streaming branches already return.
   private async readSseStream(response: Response): Promise<string> {
     const reader = response.body?.getReader();
     if (!reader) {
-      // Fallback: some runtimes might not expose a streamable body the same
-      // way — try reading it as plain text/JSON as a last resort.
       const data = await response.json() as any;
       return data.choices?.[0]?.message?.content || '';
     }
@@ -277,7 +277,7 @@ export abstract class AgentBase implements IAgent {
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
-      buffer = lines.pop() || ''; // keep the last, possibly-incomplete line
+      buffer = lines.pop() || '';
 
       for (const line of lines) {
         const trimmed = line.trim();
@@ -291,8 +291,6 @@ export abstract class AgentBase implements IAgent {
           const delta = chunk.choices?.[0]?.delta?.content;
           if (delta) fullText += delta;
         } catch {
-          // Ignore malformed/partial SSE lines rather than aborting the
-          // whole response over one bad chunk.
         }
       }
     }
@@ -313,11 +311,6 @@ export abstract class AgentBase implements IAgent {
       'xai':        'https://api.x.ai/v1',
     };
 
-    // ⚠️ 'openailike' is intentionally NOT given a default here — its base
-    // URL varies per deployment (e.g. a Colab/LocalTunnel/cloudflared URL
-    // that changes every session), so there is no safe generic default.
-    // If OPENAI_LIKE_API_BASE_URL wasn't set, fail loudly instead of
-    // silently sending the request (and our local API key) to real OpenAI.
     if (providerName === 'openailike' && !known[providerName]) {
       throw new Error(
         'OpenAILike provider has no base URL configured. Set OPENAI_LIKE_API_BASE_URL in your environment.'
@@ -327,60 +320,93 @@ export abstract class AgentBase implements IAgent {
     return known[providerName] || 'https://api.openai.com/v1';
   }
 
+  private findBalancedJsonSpan(str: string, start: number): string | null {
+    let depth = 0;
+    let inString = false;
+    let escapeNext = false;
+
+    for (let i = start; i < str.length; i++) {
+      const ch = str[i];
+
+      if (escapeNext) {
+        escapeNext = false;
+        continue;
+      }
+      if (ch === '\\') {
+        if (inString) escapeNext = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+
+      if (ch === '{' || ch === '[') {
+        depth++;
+      } else if (ch === '}' || ch === ']') {
+        depth--;
+        if (depth === 0) return str.substring(start, i + 1);
+        if (depth < 0) return null;
+      }
+    }
+    return null;
+  }
+
+  private stripJsonComments(jsonCandidate: string): string {
+    let out = jsonCandidate.replace(/("(?:[^"\\]|\\.)*")|(\/\/[^\n]*)/g, (_m, stringLiteral) =>
+      stringLiteral !== undefined ? stringLiteral : ''
+    );
+    out = out.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+    out = out.replace(/,(\s*[}\]])/g, '$1');
+    return out;
+  }
+
   protected extractJson(text: string): string {
-    let cleaned = text
-      .replace(/```json\n?/g, '')
+    const cleanedFence = text
+      .replace(/```json\n?/gi, '')
       .replace(/```\n?/g, '')
       .trim();
 
-    // ⚠️ FIX: small models sometimes abbreviate JSON output with a JS-style
-    // comment instead of writing everything out, e.g.
-    // `"categories": [ ... ] // Add more categories here` — this isn't
-    // valid JSON and was causing "Failed to extract valid JSON" errors
-    // (seen on the data agent). Strip `//comment` text, but only OUTSIDE
-    // string literals, so URLs like "https://..." inside actual string
-    // values are left untouched.
-    cleaned = cleaned.replace(/("(?:[^"\\]|\\.)*")|(\/\/[^\n]*)/g, (_match, stringLiteral) =>
-      stringLiteral !== undefined ? stringLiteral : ''
-    );
-
-    const firstBrace = cleaned.indexOf('{');
-    const firstBracket = cleaned.indexOf('[');
-
-    let start = -1;
-    if (firstBrace === -1) start = firstBracket;
-    else if (firstBracket === -1) start = firstBrace;
-    else start = Math.min(firstBrace, firstBracket);
-
-    if (start === -1) throw new Error('No JSON found in LLM response');
-
-    const lastBrace = cleaned.lastIndexOf('}');
-    const lastBracket = cleaned.lastIndexOf(']');
-    const end = Math.max(lastBrace, lastBracket);
-
-    if (end === -1) throw new Error('Invalid JSON in LLM response');
-
-    cleaned = cleaned.substring(start, end + 1);
-    cleaned = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
-    // Strip trailing commas before a closing brace/bracket — another common
-    // small-model JSON mistake (and can appear after comment-stripping above).
-    cleaned = cleaned.replace(/,(\s*[}\]])/g, '$1');
-
-    try {
-      JSON.parse(cleaned);
-      return cleaned;
-    } catch {
-      cleaned = cleaned.replace(
-        /"((?:[^"\\]|\\.)*)"/g,
-        (_match, p1) => `"${p1
-          .replace(/\n/g, '\\n')
-          .replace(/\r/g, '\\r')
-          .replace(/\t/g, '\\t')
-        }"`
-      );
-      JSON.parse(cleaned);
-      return cleaned;
+    const candidateStarts: number[] = [];
+    for (let i = 0; i < cleanedFence.length; i++) {
+      if (cleanedFence[i] === '{' || cleanedFence[i] === '[') candidateStarts.push(i);
     }
+
+    const attempts: string[] = [];
+
+    for (const start of candidateStarts.slice(0, 25)) {
+      const span = this.findBalancedJsonSpan(cleanedFence, start);
+      if (!span) continue;
+
+      const candidate = this.stripJsonComments(span);
+      attempts.push(candidate);
+
+      try {
+        JSON.parse(candidate);
+        return candidate;
+      } catch {
+        try {
+          const repaired = candidate.replace(
+            /"((?:[^"\\]|\\.)*)"/g,
+            (_m, p1) => `"${p1.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t')}"`
+          );
+          JSON.parse(repaired);
+          return repaired;
+        } catch {
+          continue;
+        }
+      }
+    }
+
+    const preview = text.length > 1500 ? `${text.slice(0, 800)}\n...[truncated]...\n${text.slice(-700)}` : text;
+    console.error(`[${this.config.name}] ❌ Could not extract valid JSON. Raw response:\n${preview}`);
+
+    throw new Error(
+      candidateStarts.length === 0
+        ? 'No JSON found in LLM response'
+        : `Found ${candidateStarts.length} candidate JSON start(s) but none parsed successfully (response likely truncated — consider raising MAX_COMPLETION_TOKENS)`
+    );
   }
 
   protected parseJson<T>(jsonString: string): T {

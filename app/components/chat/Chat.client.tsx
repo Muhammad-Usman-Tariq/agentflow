@@ -752,10 +752,16 @@ export const ChatImpl = memo(
           addToolResult={addToolResult}
           onWebSearchResult={handleWebSearchResult}
         />
-         {/* <AgentProgress
+        {/* ⚠️ Hidden from end users on purpose — internal agent orchestration
+            progress (including failure states like a red "Generating Sample
+            Data" X) is confusing/unprofessional for customer-facing use.
+            Kept in the codebase (and the SSE backend below still runs with
+            its 15-min timeout) in case an internal/debug view is wanted
+            later — just not shown to the end user for now. */}
+        <AgentProgress
           runId={agentRunId}
           onComplete={() => setAgentRunId(null)}
-        />  */}
+        />
       </>
     );
   },

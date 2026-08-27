@@ -1,5 +1,6 @@
-import { json, type ActionFunctionArgs } from '@remix-run/cloudflare';
+﻿import { json, type ActionFunctionArgs } from '@remix-run/cloudflare';
 import { Orchestrator } from '~/lib/agents/core/orchestrator';
+import { mergeServerEnv } from '~/lib/.server/llm/utils';
 
 export async function action({ request, context }: ActionFunctionArgs) {
   const { query } = await import('~/lib/db.server');
@@ -17,14 +18,15 @@ export async function action({ request, context }: ActionFunctionArgs) {
   console.log(`Chat: ${chatId}`);
   console.log(`Request: "${userRequest}"`);
 
+  const env = mergeServerEnv(context.cloudflare?.env as unknown as Record<string, string | undefined> | undefined);
+
   try {
-    console.log('ENV CHECK:', JSON.stringify(context.cloudflare?.env));
-    const orchestrator = new Orchestrator(context.cloudflare?.env as any);
+    console.log('ENV CHECK:', JSON.stringify(env));
+    const orchestrator = new Orchestrator(env);
 
     const result = await orchestrator.start(
       userRequest,
       chatId,
-      // Progress callback — saved to DB for SSE to pick up
       async (event) => {
         try {
           await query(
@@ -38,21 +40,15 @@ export async function action({ request, context }: ActionFunctionArgs) {
           JSON.stringify({ message: event.message }),
           event.data ? JSON.stringify(event.data) : null,
           ],
-         context.cloudflare?.env as any
+         env
           );
         } catch (e) {
-          // Progress save failure should not stop execution
           console.error('Failed to save progress:', e);
         }
       }
     );
 
     if (!result.success) {
-      // ⚠️ FIX: was discarding result.files/warnings/runId whenever
-      // success was false — meaning the detailed per-agent failure list
-      // (added so we could see WHY analyst/architect/coder failed) never
-      // actually reached the client. Now the failure response includes
-      // everything the success response would, just with success:false.
       return json({
         success: false,
         error: result.error,
@@ -89,11 +85,13 @@ export async function loader({ request, context }: any) {
     return json({ error: 'runId required' }, { status: 400 });
   }
 
+  const env = mergeServerEnv(context.cloudflare?.env as unknown as Record<string, string | undefined> | undefined);
+
   try {
     const runResult = await query(
       'SELECT * FROM agent_runs WHERE id = $1',
       [runId],
-      context.cloudflare?.env as any
+      env
     );
 
     const tasksResult = await query(
@@ -102,7 +100,7 @@ export async function loader({ request, context }: any) {
        WHERE run_id = $1 
        ORDER BY started_at ASC`,
         [runId],
-        context.cloudflare?.env as any
+        env
     );
 
     return json({

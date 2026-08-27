@@ -1,4 +1,4 @@
-import { type ActionFunctionArgs } from '@remix-run/cloudflare';
+﻿import { type ActionFunctionArgs } from '@remix-run/cloudflare';
 import { createDataStream, generateId } from 'ai';
 import { MAX_RESPONSE_SEGMENTS, MAX_TOKENS, type FileMap } from '~/lib/.server/llm/constants';
 import { CONTINUE_PROMPT } from '~/lib/common/prompts/prompts';
@@ -10,7 +10,7 @@ import { getFilePaths, selectContext } from '~/lib/.server/llm/select-context';
 import type { ContextAnnotation, ProgressAnnotation } from '~/types/context';
 import { WORK_DIR } from '~/utils/constants';
 import { createSummary } from '~/lib/.server/llm/create-summary';
-import { extractPropertiesFromMessage } from '~/lib/.server/llm/utils';
+import { extractPropertiesFromMessage, mergeServerEnv } from '~/lib/.server/llm/utils';
 import type { DesignScheme } from '~/types/design-scheme';
 import { MCPService } from '~/lib/services/mcpService';
 import { StreamRecoveryManager } from '~/lib/.server/llm/stream-recovery';
@@ -21,7 +21,7 @@ export async function action(args: ActionFunctionArgs) {
 
 const logger = createScopedLogger('api.chat');
 
-// NOTE: parseCookies was removed — this route no longer reads any cookie for
+// NOTE: parseCookies was removed â€” this route no longer reads any cookie for
 // model/provider/key selection. See the comment above `apiKeys` in chatAction().
 
 async function chatAction({ context, request }: ActionFunctionArgs) {
@@ -45,14 +45,20 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
       maxLLMSteps: number;
     }>();
 
-  // ⚠️ FIX: no cookies, no client input — model/provider/key come from .env ONLY.
+  // âš ï¸ FIX: no cookies, no client input â€” model/provider/key come from .env ONLY.
   // This app's entire design is "set PROVIDER_NAME / PROVIDER_API_KEY / DEFAULT_MODEL
-  // in .env and it just works" — there is no UI where the user picks a model or types
+  // in .env and it just works" â€” there is no UI where the user picks a model or types
   // a key (ModelSelector isn't even rendered in BaseChat), so reading `apiKeys`/
   // `providers` cookies here was dead legacy code inherited from upstream bolt.diy's
   // BYOK feature. It could never help, and could only ever cause bugs (e.g. a stray
   // leftover cookie silently overriding the .env key). Removed entirely.
-  const env = (context.cloudflare?.env as unknown) as Record<string, string> || {};
+  // âš ï¸ FIX: was `context.cloudflare?.env` alone â€” empty/incomplete in local
+  // Cloudflare dev when `.dev.vars` is missing a key, and ALWAYS empty in a
+  // packaged Electron build (see mergeServerEnv's comment in utils.ts). Now
+  // merged with process.env (populated from `.env.local` via dotenv in
+  // vite.config.ts) so this never silently falls back to real OpenAI just
+  // because one particular env source didn't have the value.
+  const env = mergeServerEnv(context.cloudflare?.env as unknown as Record<string, string | undefined> | undefined);
   const providerName = env.PROVIDER_NAME || '';
 
   const apiKeys: Record<string, string> = providerName && env.PROVIDER_API_KEY
@@ -108,7 +114,7 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
 
           summary = await createSummary({
             messages: [...processedMessages],
-            env: context.cloudflare?.env as any,
+            env,
             apiKeys,
             providerSettings,
             promptId,
@@ -150,7 +156,7 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
           console.log(`Messages count: ${processedMessages.length}`);
           filteredFiles = await selectContext({
             messages: [...processedMessages],
-            env: context.cloudflare?.env as any,
+            env,
             apiKeys,
             files,
             providerSettings,
@@ -256,7 +262,7 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
 
             const result = await streamText({
               messages: [...processedMessages],
-              env: context.cloudflare?.env as any,
+              env,
               options,
               apiKeys,
               files,
@@ -297,7 +303,7 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
 
         const result = await streamText({
           messages: [...processedMessages],
-          env: context.cloudflare?.env as any,
+          env,
           options,
           apiKeys,
           files,
@@ -338,10 +344,10 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
         // Provide more specific error messages for common issues
         const errorMessage = error.message || 'Unknown error';
 
-        // 🔧 TEMP DEBUG (remove after root-cause is found): Cloudflare's real-time
+        // ðŸ”§ TEMP DEBUG (remove after root-cause is found): Cloudflare's real-time
         // logs UI is unreliable, so surface the FULL raw error directly in the chat
         // response instead of the generic categorized message below. This bypasses
-        // every if-check below on purpose — do not delete those, just comment/remove
+        // every if-check below on purpose â€” do not delete those, just comment/remove
         // this return once we know the real cause.
         return `RAW DEBUG ERROR: ${errorMessage} | Full: ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`;
 

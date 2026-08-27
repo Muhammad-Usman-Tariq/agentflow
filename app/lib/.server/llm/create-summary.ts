@@ -1,4 +1,4 @@
-import { generateText, type CoreTool, type GenerateTextResult, type Message } from 'ai';
+﻿import { generateText, type CoreTool, type GenerateTextResult, type Message } from 'ai';
 import type { IProviderSetting } from '~/types/model';
 import { DEFAULT_MODEL, DEFAULT_PROVIDER, PROVIDER_LIST } from '~/utils/constants';
 import { extractCurrentContext, extractPropertiesFromMessage, simplifyBoltActions } from './utils';
@@ -9,7 +9,7 @@ const logger = createScopedLogger('create-summary');
 
 export async function createSummary(props: {
   messages: Message[];
-  env?: Env;
+  env?: Env | Record<string, string>;
   apiKeys?: Record<string, string>;
   providerSettings?: Record<string, IProviderSetting>;
   promptId?: string;
@@ -39,20 +39,12 @@ export async function createSummary(props: {
     return message;
   });
 
-  // extractPropertiesFromMessage() only finds a provider/model when the
-  // frontend embeds a [Model: ...]/[Provider: ...] tag in the message text.
-  // Since this app is driven by .env (PROVIDER_NAME/DEFAULT_MODEL), not
-  // per-message tags, extraction always falls through to the hardcoded
-  // DEFAULT_MODEL/DEFAULT_PROVIDER.name constants — which are computed once
-  // at module load, before Cloudflare's per-request env is available, so
-  // they resolve to plain "OpenAI". When that fallback happened, prefer the
-  // real per-request env values instead.
   const envAny = serverEnv as any;
-  if (currentProvider === DEFAULT_PROVIDER.name && envAny?.PROVIDER_NAME) {
-    currentProvider = envAny.PROVIDER_NAME;
+  if (currentProvider === DEFAULT_PROVIDER.name && (envAny?.PROVIDER_NAME || process.env.PROVIDER_NAME)) {
+    currentProvider = envAny?.PROVIDER_NAME || process.env.PROVIDER_NAME;
   }
-  if (currentModel === DEFAULT_MODEL && envAny?.DEFAULT_MODEL) {
-    currentModel = envAny.DEFAULT_MODEL;
+  if (currentModel === DEFAULT_MODEL && (envAny?.DEFAULT_MODEL || process.env.DEFAULT_MODEL)) {
+    currentModel = envAny?.DEFAULT_MODEL || process.env.DEFAULT_MODEL;
   }
 
   const provider = PROVIDER_LIST.find((p) => p.name === currentProvider) || DEFAULT_PROVIDER;
@@ -76,7 +68,6 @@ export async function createSummary(props: {
     modelDetails = modelsList.find((m) => m.name === currentModel);
 
     if (!modelDetails) {
-      // Fallback to first model
       logger.warn(
         `MODEL [${currentModel}] not found in provider [${provider.name}]. Falling back to first model. ${modelsList[0].name}`,
       );
@@ -115,7 +106,6 @@ ${summary.summary}`;
       ? (message.content.find((item) => item.type === 'text')?.text as string) || ''
       : message.content;
 
-  // select files from the list of code file from the project that might be useful for the current request from the user
   const resp = await generateText({
     system: `
         You are a software engineer. You are working on a project. you need to summarize the work till now and provide a summary of the chat till now.

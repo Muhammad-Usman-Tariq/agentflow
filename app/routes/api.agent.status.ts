@@ -1,9 +1,10 @@
-import type { LoaderFunctionArgs } from '@remix-run/cloudflare';
+﻿import type { LoaderFunctionArgs } from '@remix-run/cloudflare';
+import { mergeServerEnv } from '~/lib/.server/llm/utils';
 
-// Server Sent Events — real time progress streaming to UI
+// Server Sent Events â€” real time progress streaming to UI
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const { query } = await import('~/lib/db.server');
-  const env = context.cloudflare?.env as any;
+  const env = mergeServerEnv(context.cloudflare?.env as unknown as Record<string, string | undefined> | undefined);
   const url = new URL(request.url);
   const runId = url.searchParams.get('runId');
 
@@ -24,7 +25,13 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
       let lastTaskCount = 0;
       let attempts = 0;
-      const maxAttempts = 120; // 2 minutes max polling
+      // âš ï¸ FIX: was 120 (2 min) â€” the coder agent alone can now legitimately
+      // run up to 20 minutes (one LLM call per file against a slow, shared,
+      // free-tier GPU). At 2 minutes the SSE stream gave up and disconnected
+      // long before the orchestrator actually finished, making a genuinely
+      // successful run look like it silently died in the UI. 900 attempts *
+      // 1s poll interval = 15 minutes, matching the agents' own timeouts.
+      const maxAttempts = 900; // 15 minutes max polling
 
       const poll = async () => {
         try {

@@ -70,3 +70,79 @@ export const BACKEND_CODER_USER_PROMPT = (architecture: any) =>
   `Build the BACKEND and DATABASE for this project:\n` +
   `Architecture (apiRoutes/databaseType/databaseSchema — implement these exactly): ${JSON.stringify(architecture)}\n` +
   `Write ALL backend route files and database schema files described in the architecture. Return JSON only.`;
+
+// ⚠️ FIX (root cause of "Expected property name or '}' in JSON" failures):
+// asking a small self-hosted model to return MULTIPLE full source files
+// escaped inside ONE JSON string blob reliably breaks — at MAX_COMPLETION_TOKENS
+// budgets small enough for a free-tier GPU (e.g. 2048), the response gets cut
+// off mid-file, mid-string, producing invalid JSON with no usable recovery.
+// These PER-FILE prompts ask for exactly ONE file's raw content per call —
+// no JSON wrapper, no escaping needed at all — so each call only needs a
+// fraction of the tokens and a truncated/slow response only loses ONE file
+// instead of the entire frontend or backend.
+
+export const FRONTEND_FILE_SYSTEM_PROMPT = `
+You are an expert frontend developer. Write the complete, working code for
+ONE specific file in a larger project, based on the architecture you're given.
+
+RULES:
+- Output ONLY the raw file content. No JSON, no markdown code fences, no
+  explanation, no "Here is the file" preamble — start directly with the
+  file's actual first character.
+- No placeholders or TODOs — write real, complete, working code.
+- Use Tailwind CSS for styling where relevant, mobile responsive, include
+  reasonable error handling.
+- If this file needs to call a backend API route, use fetch (e.g. fetch('/api/...')).
+- Stay consistent with the full project file list and components list you're
+  given, so imports between files line up correctly.
+`;
+
+export const FRONTEND_FILE_USER_PROMPT = (
+  requirements: any,
+  architecture: any,
+  designDecisions: any,
+  filePath: string,
+  purpose: string,
+) =>
+  `Project requirements: ${JSON.stringify(requirements)}\n` +
+  `Full project file list (for import consistency — you are only writing ONE of these files right now): ${JSON.stringify(
+    (architecture?.fileStructure || []).map((f: any) => f.path),
+  )}\n` +
+  `Components in this project: ${JSON.stringify(architecture?.components || [])}\n` +
+  `API routes this frontend may call: ${JSON.stringify(architecture?.apiRoutes || [])}\n` +
+  `Design decisions: ${JSON.stringify(designDecisions)}\n\n` +
+  `Write the COMPLETE content of this ONE file:\n` +
+  `Path: ${filePath}\n` +
+  `Purpose: ${purpose}\n\n` +
+  `Output only the raw file content, nothing else.`;
+
+export const BACKEND_FILE_SYSTEM_PROMPT = `
+You are an expert backend developer. Write the complete, working code for ONE
+specific backend or database file in a larger project, based on the
+architecture you're given.
+
+RULES:
+- Output ONLY the raw file content. No JSON, no markdown code fences, no
+  explanation — start directly with the file's actual first character.
+- No placeholders or TODOs — write real, complete, working code.
+- If this is a database schema/migration file, match the given databaseSchema
+  exactly (tables/collections, fields, types, foreign keys/relations).
+- If this is a route handler file, implement the specific apiRoutes it's
+  responsible for, reading/writing via the given databaseSchema.
+`;
+
+export const BACKEND_FILE_USER_PROMPT = (
+  architecture: any,
+  filePath: string,
+  purpose: string,
+) =>
+  `Database type: ${architecture?.databaseType}\n` +
+  `Database schema: ${JSON.stringify(architecture?.databaseSchema || [])}\n` +
+  `API routes: ${JSON.stringify(architecture?.apiRoutes || [])}\n` +
+  `Full project file list (for reference): ${JSON.stringify(
+    (architecture?.fileStructure || []).map((f: any) => f.path),
+  )}\n\n` +
+  `Write the COMPLETE content of this ONE file:\n` +
+  `Path: ${filePath}\n` +
+  `Purpose: ${purpose}\n\n` +
+  `Output only the raw file content, nothing else.`;

@@ -1,4 +1,4 @@
-import { generateText, type CoreTool, type GenerateTextResult, type Message } from 'ai';
+﻿import { generateText, type CoreTool, type GenerateTextResult, type Message } from 'ai';
 import ignore from 'ignore';
 import type { IProviderSetting } from '~/types/model';
 import { IGNORE_PATTERNS, type FileMap } from './constants';
@@ -7,14 +7,12 @@ import { createFilesContext, extractCurrentContext, extractPropertiesFromMessage
 import { createScopedLogger } from '~/utils/logger';
 import { LLMManager } from '~/lib/modules/llm/manager';
 
-// Common patterns to ignore, similar to .gitignore
-
 const ig = ignore().add(IGNORE_PATTERNS);
 const logger = createScopedLogger('select-context');
 
 export async function selectContext(props: {
   messages: Message[];
-  env?: Env;
+  env?: Env | Record<string, string>;
   apiKeys?: Record<string, string>;
   files: FileMap;
   providerSettings?: Record<string, IProviderSetting>;
@@ -47,16 +45,12 @@ export async function selectContext(props: {
     return message;
   });
 
-  // See create-summary.ts for full explanation: extraction falls back to the
-  // hardcoded DEFAULT_MODEL/DEFAULT_PROVIDER.name when no per-message
-  // [Model:]/[Provider:] tag is embedded, which doesn't reflect our .env
-  // override. Prefer the real per-request env values in that case.
   const envAny = serverEnv as any;
-  if (currentProvider === DEFAULT_PROVIDER.name && envAny?.PROVIDER_NAME) {
-    currentProvider = envAny.PROVIDER_NAME;
+  if (currentProvider === DEFAULT_PROVIDER.name && (envAny?.PROVIDER_NAME || process.env.PROVIDER_NAME)) {
+    currentProvider = envAny?.PROVIDER_NAME || process.env.PROVIDER_NAME;
   }
-  if (currentModel === DEFAULT_MODEL && envAny?.DEFAULT_MODEL) {
-    currentModel = envAny.DEFAULT_MODEL;
+  if (currentModel === DEFAULT_MODEL && (envAny?.DEFAULT_MODEL || process.env.DEFAULT_MODEL)) {
+    currentModel = envAny?.DEFAULT_MODEL || process.env.DEFAULT_MODEL;
   }
 
   const provider = PROVIDER_LIST.find((p) => p.name === currentProvider) || DEFAULT_PROVIDER;
@@ -80,7 +74,6 @@ export async function selectContext(props: {
     modelDetails = modelsList.find((m) => m.name === currentModel);
 
     if (!modelDetails) {
-      // Fallback to first model
       logger.warn(
         `MODEL [${currentModel}] not found in provider [${provider.name}]. Falling back to first model. ${modelsList[0].name}`,
       );
@@ -130,7 +123,6 @@ export async function selectContext(props: {
     throw new Error('No user message found');
   }
 
-  // select files from the list of code file from the project that might be useful for the current request from the user
   const resp = await generateText({
     system: `
         You are a software engineer. You are working on a project. You have access to the following files:
@@ -192,7 +184,6 @@ export async function selectContext(props: {
   const updateContextBuffer = response.match(/<updateContextBuffer>([\s\S]*?)<\/updateContextBuffer>/);
 
   if (!updateContextBuffer) {
-    // Invalid format — try to extract any useful content
 console.warn('LLM returned non-standard format, using raw response');
 return files;
   }
@@ -220,8 +211,6 @@ return files;
     if (!filePaths.includes(fullPath)) {
       logger.error(`File ${path} is not in the list of files above.`);
       return;
-
-      // throw new Error(`File ${path} is not in the list of files above.`);
     }
 
     if (currrentFiles.includes(path)) {
@@ -243,8 +232,6 @@ return files;
   }
 
   return filteredFiles;
-
-  // generateText({
 }
 
 export function getFilePaths(files: FileMap) {

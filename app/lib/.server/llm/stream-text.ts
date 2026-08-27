@@ -1,4 +1,4 @@
-import { convertToCoreMessages, streamText as _streamText, type Message } from 'ai';
+﻿import { convertToCoreMessages, streamText as _streamText, type Message } from 'ai';
 import { MAX_TOKENS, isReasoningModel, type FileMap } from './constants';
 import { getSystemPrompt } from '~/lib/common/prompts/prompts';
 import { DEFAULT_MODEL, DEFAULT_PROVIDER, MODIFICATIONS_TAG_NAME, PROVIDER_LIST, WORK_DIR } from '~/utils/constants';
@@ -34,7 +34,7 @@ function sanitizeText(text: string): string {
 
 export async function streamText(props: {
   messages: Omit<Message, 'id'>[];
-  env?: Env;
+  env?: Env | Record<string, string>;
   options?: StreamingOptions;
   apiKeys?: Record<string, string>;
   files?: FileMap;
@@ -65,17 +65,12 @@ export async function streamText(props: {
   const envAny = serverEnv as any;
   console.log('ENV DUMP:', JSON.stringify(envAny));
 
-  const currentProvider = envAny?.PROVIDER_NAME || envAny?.['PROVIDER_NAME'] || '';
-  const currentModel = envAny?.DEFAULT_MODEL || DEFAULT_MODEL;
-  const currentApiKey = envAny?.PROVIDER_API_KEY || '';
+  const currentProvider = envAny?.PROVIDER_NAME || process.env.PROVIDER_NAME || '';
+  const currentModel = envAny?.DEFAULT_MODEL || process.env.DEFAULT_MODEL || DEFAULT_MODEL;
+  const currentApiKey = envAny?.PROVIDER_API_KEY || process.env.PROVIDER_API_KEY || '';
 
   logger.info(`Using Provider: ${currentProvider}, Model: ${currentModel}, Key: ${currentApiKey ? 'SET' : 'MISSING'}`);
 
-  // ⚠️ FIX: this is the final choke point before the LLM call, so it's the last line
-  // of defense — the env-configured provider's key ALWAYS comes from env, full stop.
-  // Any caller-supplied `apiKeys` (there shouldn't be any now that api.chat.ts and
-  // api.llmcall.ts no longer read cookies) can only ever apply to a DIFFERENT
-  // provider than the one .env configures; they can never override it.
   const finalApiKeys: Record<string, string> = { ...apiKeys };
   if (currentProvider) {
     finalApiKeys[currentProvider] = currentApiKey;
@@ -106,12 +101,6 @@ export async function streamText(props: {
     maxCompletionTokens: 8192,
   };
 
-  // Completion-token budget for THIS response. This is not something code can figure
-  // out on its own — it depends on the account's rate-limit tier (Groq free tier here
-  // caps at 8000 tokens/min total), which varies per provider AND per account/plan and
-  // can't be discovered in advance. So: one simple, single number, controlled entirely
-  // from .env — set MAX_COMPLETION_TOKENS to whatever fits your account. Default (4000)
-  // is a safe middle ground that fits most free-tier accounts without extra config.
   const envMaxCompletionTokens = envAny?.MAX_COMPLETION_TOKENS ? parseInt(envAny.MAX_COMPLETION_TOKENS, 10) : NaN;
   const safeMaxTokens = !isNaN(envMaxCompletionTokens) && envMaxCompletionTokens > 0
     ? envMaxCompletionTokens
@@ -155,7 +144,7 @@ let systemPrompt =
 
   if (effectiveLockedFilePaths.size > 0) {
     const lockedList = Array.from(effectiveLockedFilePaths).map((f) => `- ${f}`).join('\n');
-    systemPrompt = `${systemPrompt}\n\nIMPORTANT: These files are locked — do NOT modify:\n${lockedList}\n---\n`;
+    systemPrompt = `${systemPrompt}\n\nIMPORTANT: These files are locked - do NOT modify:\n${lockedList}\n---\n`;
   } else {
     console.log('No locked files found from any source for prompt.');
   }
@@ -171,7 +160,6 @@ let systemPrompt =
           ),
         )
       : options || {};
-        // temp debug
       console.log('chatMode:', chatMode);
       const streamParams = {
     model: provider.getModelInstance({

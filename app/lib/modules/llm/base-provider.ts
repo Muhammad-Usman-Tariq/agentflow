@@ -1,4 +1,4 @@
-import type { LanguageModelV1 } from 'ai';
+﻿import type { LanguageModelV1 } from 'ai';
 import type { ProviderInfo, ProviderConfig, ModelInfo } from './types';
 import type { IProviderSetting } from '~/types/model';
 import { createOpenAI } from '@ai-sdk/openai';
@@ -164,7 +164,7 @@ export abstract class BaseProvider implements ProviderInfo {
 
   abstract getModelInstance(options: {
     model: string;
-    serverEnv?: Env;
+    serverEnv?: Env | Record<string, string>;
     apiKeys?: Record<string, string>;
     providerSettings?: Record<string, IProviderSetting>;
   }): LanguageModelV1;
