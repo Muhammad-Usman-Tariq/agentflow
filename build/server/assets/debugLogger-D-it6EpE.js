@@ -1,4 +1,4 @@
-import { l as logger, D as DEFAULT_MODEL, P as PROVIDER_LIST } from './server-build-CbFrbelZ.js';
+import { l as logger, D as DEFAULT_MODEL, P as PROVIDER_LIST } from './server-build-DNLwl3kw.js';
 import 'react/jsx-runtime';
 import '@remix-run/react';
 import 'isbot';
@@ -43,6 +43,7 @@ import 'file-saver';
 import '@radix-ui/react-tooltip';
 import 'class-variance-authority';
 import 'framer-motion';
+import '@radix-ui/react-dialog';
 import 'react-qrcode-logo';
 
 const isMac = typeof navigator !== "undefined" ? navigator.platform.toLowerCase().includes("mac") : false;
@@ -53,12 +54,12 @@ function isMobile() {
   return globalThis.innerWidth < 640;
 }
 
-const __vite_import_meta_env__ = {"BASE_URL": "/", "DEV": false, "LMSTUDIO_API_BASE_URL": "", "MODE": "production", "OLLAMA_API_BASE_URL": "", "OPENAI_LIKE_API_BASE_URL": "https://districts-policies-prince-events.trycloudflare.com/v1", "PROD": true, "SSR": true, "TOGETHER_API_BASE_URL": "", "VITE_GITHUB_ACCESS_TOKEN": "", "VITE_GITHUB_TOKEN_TYPE": "", "VITE_GITLAB_ACCESS_TOKEN": "", "VITE_GITLAB_TOKEN_TYPE": "personal-access-token", "VITE_GITLAB_URL": "https://gitlab.com", "VITE_LOG_LEVEL": "", "VITE_NETLIFY_ACCESS_TOKEN": "", "VITE_SUPABASE_ACCESS_TOKEN": "", "VITE_SUPABASE_ANON_KEY": "", "VITE_SUPABASE_URL": "", "VITE_VERCEL_ACCESS_TOKEN": ""};
+const __vite_import_meta_env__ = {"BASE_URL": "/", "DEV": false, "LMSTUDIO_API_BASE_URL": "", "MODE": "production", "OLLAMA_API_BASE_URL": "", "OPENAI_LIKE_API_BASE_URL": "https://want-milton-lucy-pond.trycloudflare.com/v1", "PROD": true, "SSR": true, "TOGETHER_API_BASE_URL": "", "VITE_GITHUB_ACCESS_TOKEN": "", "VITE_GITHUB_TOKEN_TYPE": "", "VITE_GITLAB_ACCESS_TOKEN": "", "VITE_GITLAB_TOKEN_TYPE": "personal-access-token", "VITE_GITLAB_URL": "https://gitlab.com", "VITE_LOG_LEVEL": "", "VITE_NETLIFY_ACCESS_TOKEN": "", "VITE_SUPABASE_ACCESS_TOKEN": "", "VITE_SUPABASE_ANON_KEY": "", "VITE_SUPABASE_URL": "", "VITE_VERCEL_ACCESS_TOKEN": ""};
 let logStore = null;
 const getLogStore = () => {
   if (!logStore && typeof window !== "undefined") {
     try {
-      import('./server-build-CbFrbelZ.js').then(n => n.c).then(({ logStore: store }) => {
+      import('./server-build-DNLwl3kw.js').then(n => n.c).then(({ logStore: store }) => {
         logStore = store;
       }).catch(() => {
       });
@@ -529,7 +530,7 @@ class DebugLogger {
       const store = getLogStore();
       if (!store) {
         try {
-          const { logStore: storeModule } = await import('./server-build-CbFrbelZ.js').then(n => n.c);
+          const { logStore: storeModule } = await import('./server-build-DNLwl3kw.js').then(n => n.c);
           logStore = storeModule;
           return this._getLogStoreLogs();
         } catch {

@@ -1,9 +1,10 @@
-﻿import { generateText, type CoreTool, type GenerateTextResult, type Message } from 'ai';
+import { generateText, type CoreTool, type GenerateTextResult, type Message } from 'ai';
 import type { IProviderSetting } from '~/types/model';
-import { DEFAULT_MODEL, DEFAULT_PROVIDER, PROVIDER_LIST } from '~/utils/constants';
+import { DEFAULT_MODEL, DEFAULT_PROVIDER, MODEL_REGEX, PROVIDER_LIST, PROVIDER_REGEX } from '~/utils/constants';
 import { extractCurrentContext, extractPropertiesFromMessage, simplifyBoltActions } from './utils';
 import { createScopedLogger } from '~/utils/logger';
 import { LLMManager } from '~/lib/modules/llm/manager';
+import { resolveLLMConfig } from './resolve-provider';
 
 const logger = createScopedLogger('create-summary');
 
@@ -17,13 +18,29 @@ export async function createSummary(props: {
   onFinish?: (resp: GenerateTextResult<Record<string, CoreTool<any, any>>, never>) => void;
 }) {
   const { messages, env: serverEnv, apiKeys, providerSettings, onFinish } = props;
-  let currentModel = DEFAULT_MODEL;
-  let currentProvider = DEFAULT_PROVIDER.name;
+  const envAny = serverEnv as any;
+  const defaultConfig = resolveLLMConfig(envAny);
+
+  let currentModel = defaultConfig.model;
+  let provider = defaultConfig.provider;
+
   const processedMessages = messages.map((message) => {
     if (message.role === 'user') {
-      const { model, provider, content } = extractPropertiesFromMessage(message);
-      currentModel = model;
-      currentProvider = provider;
+      const { model: msgModel, provider: msgProvider, content } = extractPropertiesFromMessage(message);
+
+      const textContent = Array.isArray(message.content)
+        ? message.content.find((item) => item.type === 'text')?.text || ''
+        : (message.content as string);
+
+      if (MODEL_REGEX.test(textContent) && msgModel) {
+        currentModel = msgModel;
+      }
+      if (PROVIDER_REGEX.test(textContent) && msgProvider) {
+        const foundProvider = PROVIDER_LIST.find((p) => p.name.toLowerCase() === msgProvider.toLowerCase());
+        if (foundProvider) {
+          provider = foundProvider;
+        }
+      }
 
       return { ...message, content };
     } else if (message.role == 'assistant') {
@@ -38,16 +55,6 @@ export async function createSummary(props: {
 
     return message;
   });
-
-  const envAny = serverEnv as any;
-  if (currentProvider === DEFAULT_PROVIDER.name && (envAny?.PROVIDER_NAME || process.env.PROVIDER_NAME)) {
-    currentProvider = envAny?.PROVIDER_NAME || process.env.PROVIDER_NAME;
-  }
-  if (currentModel === DEFAULT_MODEL && (envAny?.DEFAULT_MODEL || process.env.DEFAULT_MODEL)) {
-    currentModel = envAny?.DEFAULT_MODEL || process.env.DEFAULT_MODEL;
-  }
-
-  const provider = PROVIDER_LIST.find((p) => p.name === currentProvider) || DEFAULT_PROVIDER;
   const staticModels = provider.staticModels || [];
   let modelDetails = staticModels.find((m) => m.name === currentModel);
 
@@ -185,6 +192,7 @@ ${slicedMessages
 
 Please provide a summary of the chat till now including the hitorical summary of the chat.
 `,
+    ...(defaultConfig.maxTokens ? { maxTokens: defaultConfig.maxTokens } : {}),
     model: provider.getModelInstance({
       model: currentModel,
       serverEnv,

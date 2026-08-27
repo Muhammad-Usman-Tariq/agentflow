@@ -1,7 +1,7 @@
-﻿import { convertToCoreMessages, streamText as _streamText, type Message } from 'ai';
+import { convertToCoreMessages, streamText as _streamText, type Message } from 'ai';
 import { MAX_TOKENS, isReasoningModel, type FileMap } from './constants';
 import { getSystemPrompt } from '~/lib/common/prompts/prompts';
-import { DEFAULT_MODEL, DEFAULT_PROVIDER, MODIFICATIONS_TAG_NAME, PROVIDER_LIST, WORK_DIR } from '~/utils/constants';
+import { DEFAULT_MODEL, DEFAULT_PROVIDER, MODEL_REGEX, MODIFICATIONS_TAG_NAME, PROVIDER_LIST, PROVIDER_REGEX, WORK_DIR } from '~/utils/constants';
 import type { IProviderSetting } from '~/types/model';
 import { PromptLibrary } from '~/lib/common/prompt-library';
 import { allowedHTMLElements } from '~/utils/markdown';
@@ -9,6 +9,7 @@ import { createScopedLogger } from '~/utils/logger';
 import { createFilesContext, extractPropertiesFromMessage } from './utils';
 import { discussPrompt } from '~/lib/common/prompts/discuss-prompt';
 import type { DesignScheme } from '~/types/design-scheme';
+import { resolveLLMConfig } from './resolve-provider';
 
 export type Messages = Message[];
 
@@ -65,22 +66,33 @@ export async function streamText(props: {
   const envAny = serverEnv as any;
   console.log('ENV DUMP:', JSON.stringify(envAny));
 
-  const currentProvider = envAny?.PROVIDER_NAME || process.env.PROVIDER_NAME || '';
-  const currentModel = envAny?.DEFAULT_MODEL || process.env.DEFAULT_MODEL || DEFAULT_MODEL;
-  const currentApiKey = envAny?.PROVIDER_API_KEY || process.env.PROVIDER_API_KEY || '';
+  const defaultConfig = resolveLLMConfig(envAny);
 
-  logger.info(`Using Provider: ${currentProvider}, Model: ${currentModel}, Key: ${currentApiKey ? 'SET' : 'MISSING'}`);
-
-  const finalApiKeys: Record<string, string> = { ...apiKeys };
-  if (currentProvider) {
-    finalApiKeys[currentProvider] = currentApiKey;
-  }
+  let currentProvider = defaultConfig.providerName;
+  let provider = defaultConfig.provider;
+  let currentModel = defaultConfig.model;
+  let currentApiKey = defaultConfig.apiKey;
 
   let processedMessages = messages.map((message) => {
     const newMessage = { ...message };
     if (message.role === 'user') {
-      const { content } = extractPropertiesFromMessage(message);
+      const { model: msgModel, provider: msgProvider, content } = extractPropertiesFromMessage(message);
       newMessage.content = sanitizeText(content);
+
+      const textContent = Array.isArray(message.content)
+        ? message.content.find((item) => item.type === 'text')?.text || ''
+        : (message.content as string);
+
+      if (MODEL_REGEX.test(textContent) && msgModel) {
+        currentModel = msgModel;
+      }
+      if (PROVIDER_REGEX.test(textContent) && msgProvider) {
+        const foundProvider = PROVIDER_LIST.find((p) => p.name.toLowerCase() === msgProvider.toLowerCase());
+        if (foundProvider) {
+          provider = foundProvider;
+          currentProvider = foundProvider.name;
+        }
+      }
     } else if (message.role === 'assistant') {
       newMessage.content = sanitizeText(message.content as string);
     }
@@ -92,7 +104,12 @@ export async function streamText(props: {
     return newMessage;
   });
 
-  const provider = PROVIDER_LIST.find((p) => p.name.toLowerCase() === currentProvider.toLowerCase()) || DEFAULT_PROVIDER;
+  logger.info(`Using Provider: ${currentProvider}, Model: ${currentModel}, Key: ${currentApiKey ? 'SET' : 'MISSING'}`);
+
+  const finalApiKeys: Record<string, string> = { ...apiKeys };
+  if (currentProvider && currentApiKey) {
+    finalApiKeys[currentProvider] = currentApiKey;
+  }
 
   const modelDetails = {
     name: currentModel,
@@ -101,10 +118,7 @@ export async function streamText(props: {
     maxCompletionTokens: 8192,
   };
 
-  const envMaxCompletionTokens = envAny?.MAX_COMPLETION_TOKENS ? parseInt(envAny.MAX_COMPLETION_TOKENS, 10) : NaN;
-  const safeMaxTokens = !isNaN(envMaxCompletionTokens) && envMaxCompletionTokens > 0
-    ? envMaxCompletionTokens
-    : 4000;
+  const safeMaxTokens = defaultConfig.maxTokens || 4000;
 
  logger.info(`Sending llm call to ${provider.name} with model ${modelDetails.name}`);
   console.log('chatMode:', chatMode);
