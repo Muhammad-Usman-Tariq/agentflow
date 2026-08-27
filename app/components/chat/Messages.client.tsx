@@ -3,7 +3,6 @@ import { Fragment } from 'react';
 import { classNames } from '~/utils/classNames';
 import { AssistantMessage } from './AssistantMessage';
 import { UserMessage } from './UserMessage';
-import { useLocation } from '@remix-run/react';
 import { chatId } from '~/lib/persistence/useChatHistory';
 import { forwardRef } from 'react';
 import type { ForwardedRef } from 'react';
@@ -27,15 +26,9 @@ interface MessagesProps {
 export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
   (props: MessagesProps, ref: ForwardedRef<HTMLDivElement> | undefined) => {
     const { id, isStreaming = false, messages = [] } = props;
-    const location = useLocation();
 
-    const handleRewind = (messageId: string) => {
-      const searchParams = new URLSearchParams(location.search);
-      searchParams.set('rewindTo', messageId);
-      window.location.search = searchParams.toString();
-    };
+    // handleRewind removed — rewind icon no longer shown in AssistantMessage
 
-    // Bug 5: handleFork removed entirely
 
     return (
       <div id={id} className={props.className} ref={ref}>
@@ -65,7 +58,6 @@ export const Messages = forwardRef<HTMLDivElement, MessagesProps>(
                         content={content}
                         annotations={message.annotations}
                         messageId={messageId}
-                        onRewind={handleRewind}
                         // Bug 6: Refresh — calls reload() which regenerates the last assistant message
                         onRefresh={props.reload}
                         // Bug 6: Edit — appends edited text as a new user message

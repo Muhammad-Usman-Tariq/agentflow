@@ -1,4 +1,4 @@
-import { l as logger, D as DEFAULT_MODEL, P as PROVIDER_LIST } from './server-build-_Pv0JMQ0.js';
+import { l as logger, D as DEFAULT_MODEL, P as PROVIDER_LIST } from './server-build-CbFrbelZ.js';
 import 'react/jsx-runtime';
 import '@remix-run/react';
 import 'isbot';
@@ -43,7 +43,6 @@ import 'file-saver';
 import '@radix-ui/react-tooltip';
 import 'class-variance-authority';
 import 'framer-motion';
-import '@radix-ui/react-dialog';
 import 'react-qrcode-logo';
 
 const isMac = typeof navigator !== "undefined" ? navigator.platform.toLowerCase().includes("mac") : false;
@@ -59,7 +58,7 @@ let logStore = null;
 const getLogStore = () => {
   if (!logStore && typeof window !== "undefined") {
     try {
-      import('./server-build-_Pv0JMQ0.js').then(n => n.c).then(({ logStore: store }) => {
+      import('./server-build-CbFrbelZ.js').then(n => n.c).then(({ logStore: store }) => {
         logStore = store;
       }).catch(() => {
       });
@@ -530,7 +529,7 @@ class DebugLogger {
       const store = getLogStore();
       if (!store) {
         try {
-          const { logStore: storeModule } = await import('./server-build-_Pv0JMQ0.js').then(n => n.c);
+          const { logStore: storeModule } = await import('./server-build-CbFrbelZ.js').then(n => n.c);
           logStore = storeModule;
           return this._getLogStoreLogs();
         } catch {

@@ -1,4 +1,4 @@
-export { s as assets, a as assetsBuildDirectory, b as basename, e as entry, f as future, i as isSpaMode, m as mode, p as publicPath, r as routes } from './assets/server-build-_Pv0JMQ0.js';
+export { s as assets, a as assetsBuildDirectory, b as basename, e as entry, f as future, i as isSpaMode, m as mode, p as publicPath, r as routes } from './assets/server-build-CbFrbelZ.js';
 import 'react/jsx-runtime';
 import '@remix-run/react';
 import 'isbot';
@@ -43,5 +43,4 @@ import 'file-saver';
 import '@radix-ui/react-tooltip';
 import 'class-variance-authority';
 import 'framer-motion';
-import '@radix-ui/react-dialog';
 import 'react-qrcode-logo';

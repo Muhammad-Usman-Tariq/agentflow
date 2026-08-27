@@ -473,13 +473,35 @@ export const ChatImpl = memo(
           workbenchStore.setDocuments(fileMap);
           workbenchStore.showWorkbench.set(true);
 
-          // Start dev server
+          // Start dev server (and backend if the project needs one)
           try {
             const hasPackageJson = 'package.json' in result.files;
             if (hasPackageJson) {
               console.log('📦 Running npm install...');
               const installProc = await container.spawn('npm', ['install']);
               await installProc.exit;
+
+              // ── Item 1 fix: detect backend need the same way coder.agent.ts does ──
+              // coder.agent.ts sets needsBackend by checking apiRoutes/databaseSchema
+              // in the architecture, and when true writes files under server/.
+              // We mirror that check here by looking for any server/ file in result.files.
+              const hasServerFiles = Object.keys(result.files as Record<string, string>)
+                .some((p) => p.startsWith('server/') || p.startsWith('/server/'));
+
+              if (hasServerFiles) {
+                console.log('🖥️ Backend detected — starting server on port 3001...');
+                // Spawn backend concurrently; pass PORT explicitly so the proxy target
+                // (http://localhost:3001 in vite.config.ts) is always correct regardless
+                // of what process.env.PORT the generated server reads.
+                const serverProc = await container.spawn('node', ['server/index.js'], {
+                  env: { PORT: '3001' },
+                });
+                serverProc.output.pipeTo(
+                  new WritableStream({ write(data) { console.log('[agent-server]', data); } })
+                );
+              }
+              // ─────────────────────────────────────────────────────────────────────
+
               console.log('🚀 Starting dev server...');
               const devProc = await container.spawn('npm', ['run', 'dev']);
               devProc.output.pipeTo(

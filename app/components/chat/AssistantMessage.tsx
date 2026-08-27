@@ -22,7 +22,6 @@ interface AssistantMessageProps {
   content: string;
   annotations?: JSONValue[];
   messageId?: string;
-  onRewind?: (messageId: string) => void;
   onRefresh?: () => void;
   onEdit?: (newContent: string) => void;
   append?: (message: Message) => void;
@@ -65,7 +64,6 @@ export const AssistantMessage = memo(
     content,
     annotations,
     messageId,
-    onRewind,
     onRefresh,
     onEdit,
     append,
@@ -158,15 +156,7 @@ export const AssistantMessage = memo(
               )}
               {messageId && (
                 <div className="flex gap-2 flex-col lg:flex-row ml-auto items-center">
-                  {onRewind && (
-                    <WithTooltip tooltip="Revert to this message">
-                      <button
-                        onClick={() => onRewind(messageId)}
-                        key="i-ph:arrow-u-up-left"
-                        className="i-ph:arrow-u-up-left text-xl text-bolt-elements-textSecondary hover:text-bolt-elements-textPrimary transition-colors"
-                      />
-                    </WithTooltip>
-                  )}
+                  {/* Refresh → Edit → Copy: exactly 3 icons, no rewind */}
                   {/* Bug 6: Refresh button — regenerates response */}
                   {onRefresh && (
                     <WithTooltip tooltip="Regenerate response">
