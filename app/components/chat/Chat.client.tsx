@@ -459,6 +459,21 @@ export const ChatImpl = memo(
 
           // Write files to WebContainer filesystem
           for (const [filePath, content] of Object.entries(result.files as Record<string, string>)) {
+            // ── Part 3b: restore SQLite binary from base64-encoded key ─────────
+            if (filePath.startsWith('__sqlite_b64__')) {
+              const actualPath = '/' + filePath.replace('__sqlite_b64__', '');
+              try {
+                const bytes = Uint8Array.from(atob(content), (c) => c.charCodeAt(0));
+                const dir = actualPath.substring(0, actualPath.lastIndexOf('/'));
+                if (dir && dir !== '/') await container.fs.mkdir(dir, { recursive: true });
+                await container.fs.writeFile(actualPath, bytes);
+                console.log('[runAgent] Restored SQLite DB to', actualPath);
+              } catch (e) {
+                console.error('Failed to restore SQLite DB:', actualPath, e);
+              }
+              continue;
+            }
+            // ────────────────────────────────────────────────────────────
             const cleanPath = filePath.startsWith('/') ? filePath : '/' + filePath;
             try {
               const dir = cleanPath.substring(0, cleanPath.lastIndexOf('/'));
@@ -525,6 +540,32 @@ export const ChatImpl = memo(
             console.error('Failed to start dev server:', e);
           }
 
+          // ── Part 3a: persist SQLite DB file alongside code files ──────────────
+          // After the backend has had time to start and create/seed the DB,
+          // read app.sqlite from the WebContainer FS, base64-encode it, and
+          // store it in the workbench file map under a stable __sqlite_b64__ key
+          // so storeMessageHistory includes it in the persisted file set.
+          try {
+            const DB_WC_PATH = '/server/database/app.sqlite';
+            const dbBytes = await container.fs.readFile(DB_WC_PATH);
+            let b64 = '';
+            const chunk = 8192;
+            for (let i = 0; i < dbBytes.length; i += chunk) {
+              b64 += String.fromCharCode(...dbBytes.slice(i, i + chunk));
+            }
+            b64 = btoa(b64);
+            const sqliteKey = '__sqlite_b64__server/database/app.sqlite';
+            workbenchStore.files.setKey(sqliteKey, {
+              type: 'file' as const,
+              content: b64,
+              isBinary: false,
+            });
+            console.log('[runAgent] ✅ SQLite DB persisted to workbench store (' + dbBytes.length + ' bytes)');
+          } catch {
+            // DB file doesn't exist yet (frontend-only project or backend hasn't written it yet)
+          }
+          // ────────────────────────────────────────────────────────────
+
           // ✅ History save after agent completes
           await storeMessageHistory(messages, workbenchStore.files.get(), false);
         }
@@ -552,14 +593,6 @@ export const ChatImpl = memo(
         const elementInfo = `<div class=\"__boltSelectedElement__\" data-element='${JSON.stringify(selectedElement)}'>${JSON.stringify(`${selectedElement.displayText}`)}</div>`;
         finalMessageContent = messageContent + elementInfo;
       }
-        append({
-        role: 'user',
-        content: messageContent,
-        parts: createMessageParts(messageContent, imageDataList), 
-        });
-      // ⚠️ FIX: don't fire the backend agent right now — queue it, it'll run in
-      // onFinish once /api/chat's stream completes (see comment there for why).
-      pendingAgentMessageRef.current = messageContent;
 
       runAnimation();
 
@@ -612,6 +645,8 @@ export const ChatImpl = memo(
                   ? { experimental_attachments: await filesToAttachments(uploadedFiles) }
                   : undefined;
 
+              // Queue agent AFTER /api/chat stream finishes (see onFinish)
+              pendingAgentMessageRef.current = messageContent;
               reload(reloadOptions);
               setInput('');
               Cookies.remove(PROMPT_COOKIE_KEY);
@@ -638,6 +673,8 @@ export const ChatImpl = memo(
           },
         ]);
 
+        // Queue agent AFTER /api/chat stream finishes (see onFinish)
+        pendingAgentMessageRef.current = messageContent;
         reload(attachments ? { experimental_attachments: attachments } : undefined);
         setFakeLoading(false);
         setInput('');
@@ -665,6 +702,8 @@ export const ChatImpl = memo(
             ? { experimental_attachments: await filesToAttachments(uploadedFiles) }
             : undefined;
 
+        // Queue agent AFTER /api/chat stream finishes (see onFinish)
+        pendingAgentMessageRef.current = messageContent;
         append(
           { role: 'user', content: messageText, parts: createMessageParts(messageText, imageDataList) },
           attachmentOptions,
@@ -679,6 +718,8 @@ export const ChatImpl = memo(
             ? { experimental_attachments: await filesToAttachments(uploadedFiles) }
             : undefined;
 
+        // Queue agent AFTER /api/chat stream finishes (see onFinish)
+        pendingAgentMessageRef.current = messageContent;
         append(
           { role: 'user', content: messageText, parts: createMessageParts(messageText, imageDataList) },
           attachmentOptions,

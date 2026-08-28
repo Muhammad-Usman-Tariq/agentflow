@@ -137,6 +137,13 @@ function synthesizeBackendFiles(
         type: 'file',
         purpose: 'Relational database schema DDL (tables, columns, foreign keys)',
       });
+      // ── Part 2: realistic seed data for SQLite preview ─────────────────────
+      backendEntries.push({
+        path: 'server/database/seed.js',
+        type: 'file',
+        purpose: 'Seed script — inserts 5-10 realistic sample rows per table so the preview shows real data on first load',
+      });
+      // ───────────────────────────────────────────────────────────────────────
     }
   }
 

@@ -41,6 +41,15 @@ You are a software architect. Design the FRONTEND file structure and UI componen
 FOLDER CONVENTION (required):
 - ALL frontend files (components, pages, config) go under "src/..." or the project root (e.g. "package.json", "index.html", "vite.config.ts").
 
+NAVIGATION RULE (required):
+- If the project has more than one page or route, you MUST include exactly ONE shared
+  layout/navigation component in the components list:
+  { "name": "SharedLayout", "filePath": "src/components/SharedLayout.tsx",
+    "props": [], "dependencies": ["react-router-dom"] }
+  This component renders a persistent top navigation bar (with <Link> elements to every
+  planned route) plus a content area where child routes are displayed.
+  Do NOT omit it — its absence produces disconnected, unnavigable pages.
+
 Return ONLY this JSON:
 {
   "fileStructure": [{"path": "string", "type": "file", "purpose": "string"}],

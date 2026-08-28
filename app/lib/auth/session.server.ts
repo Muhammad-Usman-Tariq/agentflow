@@ -1,7 +1,15 @@
 import { createCookieSessionStorage, redirect } from '@remix-run/cloudflare';
 import { verifyToken, type JWTPayload } from './auth.server';
 
-const SESSION_SECRET = process.env.SESSION_SECRET || 'bolt-session-secret-change-in-production';
+if (!process.env.SESSION_SECRET) {
+  throw new Error(
+    '[auth] SESSION_SECRET is not set.\n' +
+    'Add SESSION_SECRET=<random-64-char-string> to your .env.local (local dev) and to your\n' +
+    'hosting platform environment variables (deployed). See .env.example for instructions.\n' +
+    "Generate a value with: node -e \"console.log(require('crypto').randomBytes(48).toString('hex'))\""
+  );
+}
+const SESSION_SECRET = process.env.SESSION_SECRET as string;
 
 export const sessionStorage = createCookieSessionStorage({
   cookie: {

@@ -1,7 +1,15 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'bolt-diy-secret-key-change-in-production';
+if (!process.env.JWT_SECRET) {
+  throw new Error(
+    '[auth] JWT_SECRET is not set.\n' +
+    'Add JWT_SECRET=<random-64-char-string> to your .env.local (local dev) and to your\n' +
+    'hosting platform environment variables (deployed). See .env.example for instructions.\n' +
+    'Generate a value with: node -e "console.log(require(\'crypto\').randomBytes(48).toString(\'hex\'))"\''
+  );
+}
+const JWT_SECRET = process.env.JWT_SECRET as string;
 
 export interface JWTPayload {
   userId: string;

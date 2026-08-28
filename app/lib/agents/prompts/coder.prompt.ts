@@ -81,6 +81,39 @@ export const BACKEND_CODER_USER_PROMPT = (architecture: any) =>
 // fraction of the tokens and a truncated/slow response only loses ONE file
 // instead of the entire frontend or backend.
 
+// ── 1a: version-pinned API cheat-sheet for every per-file frontend prompt ─────
+const FRONTEND_VERSION_RULES = `
+VERSION-PINNED API RULES — these override anything from your training data:
+• react-dom 18: ReactDOM.createRoot(document.getElementById('root')!).render(<App/>)
+  NEVER use ReactDOM.render() — that is the React 17 API and will crash on React 18.
+• react-hook-form v7: const { register, handleSubmit, formState: { errors } } = useForm()
+  Spread register: {...register('fieldName')}  — NEVER ref={register('fieldName')} (v6 API).
+• react-router-dom v6: <Routes><Route path="/" element={<Home/>}/></Routes>
+  Navigation: useNavigate() -> const nav = useNavigate(); nav('/path')
+  NEVER useHistory() — that was removed in v6.
+• BrowserRouter: ONE BrowserRouter lives in src/main.tsx only. NEVER add a second one
+  inside App.tsx or any component — it causes "You cannot render a <Router> inside
+  another <Router>" crash.
+• Named imports: only import symbols that actually exist in the package. Do not invent
+  export names (e.g. react-data-grid does NOT export Grid or Table).
+`;
+
+// ── 1a: helper to inject installed versions into per-file prompts ─────────────
+export function buildVersionHintsBlock(pkgJson: any): string {
+  const allDeps: Record<string, string> = {
+    ...(pkgJson?.dependencies || {}),
+    ...(pkgJson?.devDependencies || {}),
+  };
+  if (Object.keys(allDeps).length === 0) return '';
+  const lines = Object.entries(allDeps)
+    .map(([k, v]) => `  "${k}": "${v}"`)
+    .join('\n');
+  return (
+    `Exact installed versions (write code that works with THESE versions, not any other):\n` +
+    `{\n${lines}\n}`
+  );
+}
+
 export const FRONTEND_FILE_SYSTEM_PROMPT = `
 You are an expert frontend developer. Write the complete, working code for
 ONE specific file in a larger project, based on the architecture you're given.
@@ -95,6 +128,7 @@ RULES:
 - If this file needs to call a backend API route, use fetch (e.g. fetch('/api/...')).
 - Stay consistent with the full project file list and components list you're
   given, so imports between files line up correctly.
+${FRONTEND_VERSION_RULES}
 `;
 
 export const FRONTEND_FILE_USER_PROMPT = (
@@ -103,6 +137,7 @@ export const FRONTEND_FILE_USER_PROMPT = (
   designDecisions: any,
   filePath: string,
   purpose: string,
+  versionHints?: string,
 ) =>
   `Project requirements: ${JSON.stringify(requirements)}\n` +
   `Full project file list (for import consistency — you are only writing ONE of these files right now): ${JSON.stringify(
@@ -110,11 +145,29 @@ export const FRONTEND_FILE_USER_PROMPT = (
   )}\n` +
   `Components in this project: ${JSON.stringify(architecture?.components || [])}\n` +
   `API routes this frontend may call: ${JSON.stringify(architecture?.apiRoutes || [])}\n` +
-  `Design decisions: ${JSON.stringify(designDecisions)}\n\n` +
-  `Write the COMPLETE content of this ONE file:\n` +
+  `Design decisions: ${JSON.stringify(designDecisions)}\n` +
+  (versionHints ? `\n${versionHints}\n` : '') +
+  `\nWrite the COMPLETE content of this ONE file:\n` +
   `Path: ${filePath}\n` +
   `Purpose: ${purpose}\n\n` +
   `Output only the raw file content, nothing else.`;
+
+// ── Part 2: sql.js rules replace pg in every backend per-file prompt ──────────
+const SQLITE_RULES = `
+DATABASE — this project uses sql.js (embedded SQLite, no external DB required):
+• Import the shared module:  import { getDb, persistDb } from '../database/db.js';
+  (adjust relative path based on this file's location under server/)
+• Query:
+    const db = await getDb();
+    const res = db.exec('SELECT * FROM t WHERE id = ?', [id]);
+    const cols = res[0]?.columns ?? [];
+    const rows = (res[0]?.values ?? []).map(r => Object.fromEntries(cols.map((c,i)=>[c,r[i]])));
+• Write:
+    db.run('INSERT INTO t (a, b) VALUES (?, ?)', [v1, v2]);
+    persistDb();   // call after every write
+• NEVER import or use pg, Pool, Client, DATABASE_URL, or any Postgres connection string.
+• sql.js exec() returns [] on no match — always guard with ?. (optional chaining).
+`;
 
 export const BACKEND_FILE_SYSTEM_PROMPT = `
 You are an expert backend developer. Write the complete, working code for ONE
@@ -125,24 +178,29 @@ RULES:
 - Output ONLY the raw file content. No JSON, no markdown code fences, no
   explanation — start directly with the file's actual first character.
 - No placeholders or TODOs — write real, complete, working code.
-- If this is a database schema/migration file, match the given databaseSchema
-  exactly (tables/collections, fields, types, foreign keys/relations).
-- If this is a route handler file, implement the specific apiRoutes it's
-  responsible for, reading/writing via the given databaseSchema.
+- If this is a schema file (schema.sql), match the given databaseSchema exactly
+  (tables, columns, types, NOT NULL, PRIMARY KEY, FOREIGN KEY).
+- If this is a route handler file, implement the specific apiRoutes for this file,
+  reading/writing via the databaseSchema using the sql.js module described below.
+- If this is a seed file (seed.js), generate 5-10 rows per table of realistic,
+  varied sample data (names, dates, emails — NOT "Test User 1" placeholders).
+${SQLITE_RULES}
 `;
 
 export const BACKEND_FILE_USER_PROMPT = (
   architecture: any,
   filePath: string,
   purpose: string,
+  versionHints?: string,
 ) =>
   `Database type: ${architecture?.databaseType}\n` +
   `Database schema: ${JSON.stringify(architecture?.databaseSchema || [])}\n` +
   `API routes: ${JSON.stringify(architecture?.apiRoutes || [])}\n` +
   `Full project file list (for reference): ${JSON.stringify(
     (architecture?.fileStructure || []).map((f: any) => f.path),
-  )}\n\n` +
-  `Write the COMPLETE content of this ONE file:\n` +
+  )}\n` +
+  (versionHints ? `\n${versionHints}\n` : '') +
+  `\nWrite the COMPLETE content of this ONE file:\n` +
   `Path: ${filePath}\n` +
   `Purpose: ${purpose}\n\n` +
   `Output only the raw file content, nothing else.`;
