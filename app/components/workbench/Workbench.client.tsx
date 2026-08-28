@@ -31,6 +31,8 @@ import { useChatHistory } from '~/lib/persistence';
 import { streamingState } from '~/lib/stores/streaming';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 
+import type { Message } from 'ai';
+
 interface WorkspaceProps {
   chatStarted?: boolean;
   isStreaming?: boolean;
@@ -39,6 +41,7 @@ interface WorkspaceProps {
   };
   updateChatMestaData?: (metadata: any) => void;
   setSelectedElement?: (element: ElementInfo | null) => void;
+  messages?: Message[];
 }
 
 const viewTransition = { ease: cubicEasingFn };
@@ -288,6 +291,7 @@ export const Workbench = memo(
     metadata: _metadata,
     updateChatMestaData: _updateChatMestaData,
     setSelectedElement,
+    messages,
   }: WorkspaceProps) => {
     renderLogger.trace('Workbench');
 
@@ -311,7 +315,7 @@ export const Workbench = memo(
 
     const isSmallViewport = useViewport(1024);
     const streaming = useStore(streamingState);
-    const { exportChat } = useChatHistory();
+    const { exportChat, storeMessageHistory, initialMessages } = useChatHistory();
     const [isSyncing, setIsSyncing] = useState(false);
 
     const setSelectedView = (view: WorkbenchViewType) => {
@@ -343,15 +347,44 @@ export const Workbench = memo(
     const onFileSave = useCallback(() => {
       workbenchStore
         .saveCurrentDocument()
-        .then(() => {
+        .then(async () => {
           // Explicitly refresh all previews after a file save
           const previewStore = usePreviewStore();
           previewStore.refreshAllPreviews();
+
+          // Persist manual edits to DB via storeMessageHistory
+          const activeMessages = messages && messages.length > 0 ? messages : initialMessages;
+          if (activeMessages && activeMessages.length > 0) {
+            try {
+              const { webcontainer } = await import('~/lib/webcontainer');
+              const container = await webcontainer;
+              const DB_WC_PATH = '/server/database/app.sqlite';
+              const dbBytes = await container.fs.readFile(DB_WC_PATH);
+              let b64 = '';
+              const chunk = 8192;
+              for (let i = 0; i < dbBytes.length; i += chunk) {
+                b64 += String.fromCharCode(...dbBytes.slice(i, i + chunk));
+              }
+              b64 = btoa(b64);
+              const sqliteKey = '__sqlite_b64__server/database/app.sqlite';
+              workbenchStore.files.setKey(sqliteKey, {
+                type: 'file' as const,
+                content: b64,
+                isBinary: false,
+              });
+            } catch {
+              // DB file doesn't exist in WebContainer (e.g. frontend-only project)
+            }
+
+            storeMessageHistory(activeMessages, workbenchStore.files.get(), false).catch((err) => {
+              console.error('Failed to persist manual edit to DB:', err);
+            });
+          }
         })
         .catch(() => {
           toast.error('Failed to update file content');
         });
-    }, []);
+    }, [messages, initialMessages, storeMessageHistory]);
 
     const onFileReset = useCallback(() => {
       workbenchStore.resetCurrentDocument();
