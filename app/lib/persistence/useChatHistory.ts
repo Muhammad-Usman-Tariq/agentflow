@@ -387,6 +387,12 @@ export function useChatHistory() {
       console.log('[CHAT STORE] Saving:', finalChatId, '| title:', title, '| files count:', Object.keys(mergedFiles).length);
 
       await saveToDatabase(finalChatId, title, messages, mergedFiles);
+
+      // Bug 3 follow-up: latch immediately after any save that actually wrote
+      // real files — including the very first save of a brand-new project.
+      if (Object.keys(mergedFiles).length > 0) {
+        hadFilesRef.current = true;
+      }
     },
     updateChatMestaData: async () => {},
     duplicateCurrentChat: async () => {},

@@ -1,6 +1,6 @@
 import { AgentBase } from '../core/agent-base';
 import type { AgentInput, AgentOutput } from '../types/agent.types';
-import type { ProjectArchitecture } from '../types/project.types';
+import type { ProjectArchitecture, FileNode } from '../types/project.types';
 import {
   ARCHITECT_STRUCTURE_SYSTEM_PROMPT,
   ARCHITECT_STRUCTURE_USER_PROMPT,

@@ -762,7 +762,7 @@ function ensureSharedLayout(files: Record<string, string>): string[] {
   return warnings;
 }
 
-// Bug 7 & 8 fix: bare route paths, server port 3001, auth middleware stub
+// Bug 7 & 8 fix: bare route paths, server port 3001, auth middleware stub, DB seed wiring
 function fixBackendRoutesAndServer(files: Record<string, string>): string[] {
   const warnings: string[] = [];
 
@@ -808,6 +808,41 @@ function fixBackendRoutesAndServer(files: Record<string, string>): string[] {
     }
   }
 
+  // Bug 8 fix: wire seed.js / seed.sql into DB initializer or server entry
+  const seedFile = Object.keys(files).find((p) => /^(server|backend)\/(database\/)?seed\.(js|sql)$/.test(p));
+  const dbInitFile = Object.keys(files).find((p) => /^(server|backend)\/(database\/)?db\.js$/.test(p));
+
+  if (seedFile && dbInitFile) {
+    let dbContent = files[dbInitFile];
+    if (!dbContent.includes('seed.js') && !dbContent.includes('seed.sql')) {
+      const isSqlSeed = seedFile.endsWith('.sql');
+      const seedCode = isSqlSeed
+        ? `\n    const SEED_PATH = join(__dir, '${seedFile.split('/').pop()}');\n    if (existsSync(SEED_PATH)) {\n      try { _db.run(readFileSync(SEED_PATH, 'utf8')); persistDb(); } catch (e) { console.warn('[DB] Seed warning:', e?.message); }\n    }\n`
+        : `\n    const SEED_PATH = join(__dir, '${seedFile.split('/').pop()}');\n    if (existsSync(SEED_PATH)) {\n      try { const s = await import('./${seedFile.split('/').pop()}'); if (typeof s.seed === 'function') await s.seed(_db); else if (typeof s.default === 'function') await s.default(_db); } catch (e) { console.warn('[DB] Seed warning:', e?.message); }\n    }\n`;
+
+      if (dbContent.includes('persistDb();')) {
+        dbContent = dbContent.replace('persistDb();', `${seedCode}    persistDb();`);
+      } else {
+        dbContent += seedCode;
+      }
+      files[dbInitFile] = dbContent;
+      const seedMsg = `fixBackendRoutesAndServer: wired ${seedFile} into ${dbInitFile} (runs once on empty DB)`;
+      console.warn(`[Coder] ${seedMsg}`);
+      warnings.push(seedMsg);
+    }
+  } else if (seedFile && serverEntry) {
+    let serverContent = files[serverEntry];
+    if (!serverContent.includes('seed.js') && !serverContent.includes('seed.sql')) {
+      const seedName = seedFile.split('/').pop();
+      const seedRunner = `\n// Injected: auto-run seed script on server startup if present\ntry {\n  const fs = require('fs'); const path = require('path');\n  const seedPath = path.join(__dirname, '${seedFile.includes('database/') ? 'database/' : ''}${seedName}');\n  if (fs.existsSync(seedPath)) require('./${seedFile.includes('database/') ? 'database/' : ''}${seedName}');\n} catch (e) { console.warn('[Server] Seed execution notice:', e?.message); }\n`;
+      serverContent = serverContent + seedRunner;
+      files[serverEntry] = serverContent;
+      const seedMsg = `fixBackendRoutesAndServer: wired ${seedFile} into ${serverEntry} (runs once on startup)`;
+      console.warn(`[Coder] ${seedMsg}`);
+      warnings.push(seedMsg);
+    }
+  }
+
   return warnings;
 }
 
@@ -827,6 +862,48 @@ function cleanupDuplicateHtmlFiles(files: Record<string, string>): string[] {
 
   return warnings;
 }
+
+// ── Restored Helper Functions for Bug 1d & Bug 3 ──────────────────────────────
+function validateSyntaxBalance(code: string, filePath: string): { valid: boolean; error?: string } {
+  if (!/\.(tsx?|jsx?)$/.test(filePath)) return { valid: true };
+
+  let braces = 0, parens = 0, brackets = 0;
+  let inSingle = false, inDouble = false, inTemplate = 0;
+
+  for (let i = 0; i < code.length; i++) {
+    const ch = code[i];
+    const prev = i > 0 ? code[i - 1] : '';
+
+    if (!inSingle && !inDouble && inTemplate === 0 && ch === '`' && prev !== '\\') { inTemplate++; continue; }
+    if (inTemplate > 0) { if (ch === '`' && prev !== '\\') inTemplate--; continue; }
+    if (!inDouble && ch === "'" && prev !== '\\') { inSingle = !inSingle; continue; }
+    if (!inSingle && ch === '"' && prev !== '\\') { inDouble = !inDouble; continue; }
+    if (inSingle || inDouble) continue;
+
+    if (ch === '{') braces++;
+    else if (ch === '}') braces--;
+    else if (ch === '(') parens++;
+    else if (ch === ')') parens--;
+    else if (ch === '[') brackets++;
+    else if (ch === ']') brackets--;
+  }
+
+  if (braces !== 0) return { valid: false, error: `Unbalanced braces (net: ${braces > 0 ? '+' : ''}${braces})` };
+  if (parens !== 0) return { valid: false, error: `Unbalanced parentheses (net: ${parens > 0 ? '+' : ''}${parens})` };
+  if (brackets !== 0) return { valid: false, error: `Unbalanced brackets (net: ${brackets > 0 ? '+' : ''}${brackets})` };
+  return { valid: true };
+}
+
+function resolveRelativeImport(fromFile: string, importPath: string): string {
+  const parts = fromFile.split('/');
+  parts.pop();
+  for (const seg of importPath.split('/')) {
+    if (seg === '..') parts.pop();
+    else if (seg !== '.') parts.push(seg);
+  }
+  return parts.join('/');
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Bug 3 fix: create functional component stubs for missing local imports
 function createMissingImportStubs(files: Record<string, string>): string[] {
