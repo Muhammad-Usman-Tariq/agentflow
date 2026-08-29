@@ -36,6 +36,15 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const passwordHash = await hashPassword(password);
   const user = await createUser(email, passwordHash, name, env);
 
+  // Bug 4 fix: claim guest projects so guest chats transfer to the new user account
+  const cookieHeader = request.headers.get('Cookie');
+  const guestMatch = cookieHeader?.match(/__bolt_guest_id=([^;]+)/);
+  if (guestMatch) {
+    const guestId = decodeURIComponent(guestMatch[1]);
+    const { claimGuestProjects } = await import('~/lib/db.server');
+    await claimGuestProjects(String(user.id), guestId, env);
+  }
+
   const token = signToken({ userId: user.id, email: user.email, name: user.name });
   return createUserSession(token, '/');
 }

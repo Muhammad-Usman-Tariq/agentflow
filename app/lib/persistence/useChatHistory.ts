@@ -1,5 +1,5 @@
 import { useLoaderData, useNavigate, useParams } from '@remix-run/react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { atom } from 'nanostores';
 import { type Message } from 'ai';
 import { workbenchStore } from '~/lib/stores/workbench';
@@ -149,6 +149,11 @@ export function useChatHistory() {
 
   const [initialMessages, setInitialMessages] = useState<Message[]>([]);
   const [ready, setReady] = useState<boolean>(false);
+  // Bug 3 fix: latch that flips to true the moment we confirm this chat has
+  // real files in the DB. storeMessageHistory checks this synchronously before
+  // considering an empty-map overwrite, eliminating the race between the
+  // throttled save trigger and the async WebContainer restore completing.
+  const hadFilesRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (!mixedId) {
@@ -231,6 +236,9 @@ export function useChatHistory() {
 
       // Restore files into WebContainer and Workbench Store
       if (filesToRestore && Object.keys(filesToRestore).length > 0) {
+        // Bug 3: latch before any async work so storeMessageHistory can read it
+        // synchronously even if the WebContainer write loop takes a while.
+        hadFilesRef.current = true;
           workbenchStore.showWorkbench.set(true);
           chatStore.setKey('started', true);
         console.log('[CHAT LOAD] Restoring', Object.keys(filesToRestore).length, 'files');
@@ -346,23 +354,27 @@ export function useChatHistory() {
       const containerFiles = await readWebContainerFiles();
       const mergedFiles = { ...storeFiles, ...containerFiles };
 
-      // ⚠️ FIX: this is the single choke-point every save goes through —
-      // including processSampledMessages' throttled save on every streamed
-      // chat message (Chat.client.tsx). If this fires while the page has
-      // just reloaded and the async file-restore hasn't finished yet (or
-      // any other momentary race), workbenchStore.files can be empty even
-      // though the project genuinely has real files saved from before.
-      // Without this guard, that empty snapshot silently overwrote the
-      // previously-good database record — this was the actual mechanism
-      // behind "files disappear a few minutes after sleep/reload" even
-      // though the original save had succeeded correctly. Never let an
-      // empty file-map overwrite an existing project that already has files.
+      // Bug 3 fix: two-tier empty-map guard.
+      // Tier 1 (fast, synchronous): if hadFilesRef is already latched we know
+      //   this chat has real files — bail out immediately without any network call.
+      // Tier 2 (async fallback): for the very first save after a cold page load
+      //   (before the latch fires), fall back to the original DB round-trip so we
+      //   still catch the race on brand-new sessions.
       if (Object.keys(mergedFiles).length === 0) {
+        if (hadFilesRef.current) {
+          console.warn(
+            '[CHAT STORE] Skipping save — hadFilesRef latched: this chat has real files but the workbench file-map is currently empty (restore in progress or not yet reflected in store).'
+          );
+          return;
+        }
+        // Tier 2 fallback — only runs when hadFilesRef has not yet been set.
         const existing = await loadFromDatabase(finalChatId).catch(() => null);
         const existingFileCount = existing?.files
           ? Object.keys(typeof existing.files === 'string' ? JSON.parse(existing.files) : existing.files).length
           : 0;
         if (existingFileCount > 0) {
+          // Latch now so future calls go through Tier 1.
+          hadFilesRef.current = true;
           console.warn(
             '[CHAT STORE] Skipping save — would overwrite',
             existingFileCount,

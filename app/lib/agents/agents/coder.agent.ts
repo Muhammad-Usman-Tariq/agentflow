@@ -296,6 +296,17 @@ const EXPORT_REMAP: Record<string, Record<string, string>> = {
   'react-data-grid': { Grid: 'DataGrid', Table: 'DataGrid', Column: 'GridColDef' },
 };
 
+// Bug 1 fix: npm package name validator
+const VALID_PKG_RE = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i;
+function isValidPackageName(name: string): boolean {
+  return (
+    VALID_PKG_RE.test(name) &&
+    name.length <= 214 &&
+    !/\s/.test(name) &&
+    !name.includes('..')
+  );
+}
+
 // ── 1b: React compatibility guard ────────────────────────────────────────────
 // react-data-grid v7+ requires React 19. If the project declares React 18 and
 // uses react-data-grid, swap it to @mui/x-data-grid + fix all imports.
@@ -334,13 +345,15 @@ function guardReactCompatibility(files: Record<string, string>): void {
   }
 }
 
-function reconcileDependencies(files: Record<string, string>): void {
+function reconcileDependencies(files: Record<string, string>): string[] {
+  const warnings: string[] = [];
   const sourceFiles = Object.entries(files).filter(
     ([p]) => /\.(ts|tsx|js|jsx|mjs|cjs)$/.test(p) && p !== 'vite.config.ts' && p !== 'postcss.config.js' && p !== 'tailwind.config.js',
   );
 
   const detectedPackages = new Set<string>();
-  const importPattern = /^import\s[\s\S]*?['"]([^./][^'"]*)['"];?$/gm;
+  // Bug 1 fix: non-line-crossing import pattern
+  const importPattern = /^\s*import\s+(?:[^'"\n]*?\s+from\s+)?['"]([^'"]+)['"]\s*;?\s*$/gm;
   const requirePattern = /require\(['"]((?:@[^/]+\/)?[^/.'"@][^'"]*?)['"]/g;
 
   for (const [, content] of sourceFiles) {
@@ -349,24 +362,42 @@ function reconcileDependencies(files: Record<string, string>): void {
     importPattern.lastIndex = 0;
     while ((m = importPattern.exec(content)) !== null) {
       const spec = m[1];
+      if (spec.startsWith('.')) continue;
       const pkgName = spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0];
-      if (pkgName && !pkgName.startsWith('.')) detectedPackages.add(pkgName);
+      if (pkgName) {
+        if (isValidPackageName(pkgName)) {
+          detectedPackages.add(pkgName);
+        } else {
+          const msg = `reconcileDependencies: rejected invalid package candidate "${pkgName}"`;
+          console.warn(`[Coder] ${msg}`);
+          warnings.push(msg);
+        }
+      }
     }
 
     requirePattern.lastIndex = 0;
     while ((m = requirePattern.exec(content)) !== null) {
       const spec = m[1];
+      if (spec.startsWith('.')) continue;
       const pkgName = spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0];
-      if (pkgName && !pkgName.startsWith('.')) detectedPackages.add(pkgName);
+      if (pkgName) {
+        if (isValidPackageName(pkgName)) {
+          detectedPackages.add(pkgName);
+        } else {
+          const msg = `reconcileDependencies: rejected invalid package candidate "${pkgName}"`;
+          console.warn(`[Coder] ${msg}`);
+          warnings.push(msg);
+        }
+      }
     }
   }
 
-  if (!files['package.json']) return;
+  if (!files['package.json']) return warnings;
   let pkgJson: any;
   try {
     pkgJson = JSON.parse(files['package.json']);
   } catch {
-    return;
+    return warnings;
   }
 
   const allDeclared = new Set([
@@ -388,28 +419,28 @@ function reconcileDependencies(files: Record<string, string>): void {
     const version = KNOWN_VERSIONS[pkg] || '*';
     pkgJson.dependencies[pkg] = version;
     injected++;
-    console.log(`[Coder] reconcileDependencies: added missing dep "${pkg}": "${version}"`);
+    const msg = `reconcileDependencies: added missing dep "${pkg}": "${version}"`;
+    console.log(`[Coder] ${msg}`);
+    warnings.push(msg);
 
-    // ── 1b: inject mandatory peer deps ───────────────────────────────────────
     const peers = PEER_DEPS_MAP[pkg];
     if (peers) {
       for (const [peer, peerVersion] of Object.entries(peers)) {
         if (!pkgJson.dependencies[peer] && !pkgJson.devDependencies?.[peer]) {
           pkgJson.dependencies[peer] = peerVersion;
           injected++;
-          console.log(`[Coder] reconcileDependencies: added peer dep "${peer}": "${peerVersion}" (required by "${pkg}")`);
+          const peerMsg = `reconcileDependencies: added peer dep "${peer}": "${peerVersion}" (required by "${pkg}")`;
+          console.log(`[Coder] ${peerMsg}`);
+          warnings.push(peerMsg);
         }
       }
     }
-    // ─────────────────────────────────────────────────────────────────────────
   }
 
   if (injected > 0) {
     files['package.json'] = JSON.stringify(pkgJson, null, 2);
-    console.log(`[Coder] reconcileDependencies: injected ${injected} package(s) into package.json`);
   }
 
-  // ── 1b: named-import symbol validation + deterministic remap ─────────────
   const NAMED_IMPORT_RE = /import\s*\{([^}]+)\}\s*from\s*['"]((?:@[^/]+\/)?[^/.'"][^'"]*)['"]/g;
   for (const [fp, content] of Object.entries(files)) {
     if (!/\.(tsx?|jsx?)$/.test(fp)) continue;
@@ -426,7 +457,9 @@ function reconcileDependencies(files: Record<string, string>): void {
       for (const name of importedNames) {
         if (invalids?.has(name)) {
           const replacement = remaps?.[name] || 'DataGrid';
-          console.warn(`[Coder] validateNamedImports: "${name}" does not exist in "${pkgName}" — remapping to "${replacement}"`);
+          const msg = `validateNamedImports: "${name}" does not exist in "${pkgName}" — remapping to "${replacement}" in ${fp}`;
+          console.warn(`[Coder] ${msg}`);
+          warnings.push(msg);
           updated = updated.replace(new RegExp(`\\b${name}\\b`, 'g'), replacement);
           fileChanged = true;
         }
@@ -436,16 +469,47 @@ function reconcileDependencies(files: Record<string, string>): void {
       files[fp] = updated;
     }
   }
-  // ─────────────────────────────────────────────────────────────────────────
+
+  return warnings;
 }
 
-function ensureEntryPoint(files: Record<string, string>, architecture: any): void {
-  const hasEntry = Object.keys(files).some((path) => ENTRY_FILE_PATTERN.test(path));
-  if (hasEntry) {
-    ensureBrowserRouter(files);
-    return;
+// Bug 5 fix: strip extra BrowserRouter / HashRouter wrappers outside main.tsx
+function stripExtraRouters(files: Record<string, string>): string[] {
+  const warnings: string[] = [];
+  const mainEntry = Object.keys(files).find((p) => ENTRY_FILE_PATTERN.test(p));
+
+  for (const [fp, content] of Object.entries(files)) {
+    if (fp === mainEntry) continue;
+    if (!/\.(tsx?|jsx?)$/.test(fp)) continue;
+    if (!content.includes('BrowserRouter') && !content.includes('HashRouter')) continue;
+
+    let updated = content;
+
+    // Remove BrowserRouter / HashRouter import
+    updated = updated.replace(/import\s*\{[^}]*\b(BrowserRouter|HashRouter)\b[^}]*\}\s*from\s*['"]react-router-dom['"];?\r?\n?/g, (match) => {
+      const symbols = match.match(/\{([^}]+)\}/)?.[1] || '';
+      const remaining = symbols.split(',').map(s => s.trim()).filter(s => s && s !== 'BrowserRouter' && s !== 'HashRouter');
+      return remaining.length > 0 ? `import { ${remaining.join(', ')} } from 'react-router-dom';\n` : '';
+    });
+
+    // Strip JSX tags <BrowserRouter>...</BrowserRouter> or <HashRouter>...</HashRouter>
+    updated = updated.replace(/<BrowserRouter[^>]*>([\s\S]*?)<\/BrowserRouter>/g, '$1');
+    updated = updated.replace(/<HashRouter[^>]*>([\s\S]*?)<\/HashRouter>/g, '$1');
+
+    if (updated !== content) {
+      files[fp] = updated;
+      const msg = `stripExtraRouters: removed nested Router wrapper from ${fp} (BrowserRouter belongs in main.tsx only)`;
+      console.warn(`[Coder] ${msg}`);
+      warnings.push(msg);
+    }
   }
 
+  return warnings;
+}
+
+// Bug 4 fix: ensure entry point & guaranteed root path "/"
+function ensureEntryPoint(files: Record<string, string>, architecture: any): string[] {
+  const warnings: string[] = [];
   const pageFiles = Object.keys(files)
     .filter((p) => /\/pages\//.test(p) && /\.(tsx|jsx)$/.test(p))
     .sort();
@@ -456,16 +520,54 @@ function ensureEntryPoint(files: Record<string, string>, architecture: any): voi
   }
 
   const appFile = Object.keys(files).find((p) => /^src\/App\.(tsx|jsx)$/.test(p));
-  if (!appFile && pageFiles.length > 1) {
+
+  if (appFile) {
+    let appContent = files[appFile];
+    const hasRootRoute = /<Route\s+[^>]*path=["']\/["']/i.test(appContent);
+    if (!hasRootRoute && appContent.includes('<Routes>')) {
+      const homePage = pageFiles.find((p) => /home|index|landing/i.test(p)) || pageFiles[0];
+      if (homePage) {
+        const componentName = homePage.split('/').pop()!.replace(/\.(tsx|jsx)$/, '');
+        const importPath = './' + homePage.replace(/^src\//, '').replace(/\.(tsx|jsx)$/, '');
+        if (!appContent.includes(importPath)) {
+          appContent = `import ${componentName} from '${importPath}';\n` + appContent;
+        }
+        appContent = appContent.replace(
+          /(<Routes>)/,
+          `$1\n        <Route path="/" element={<${componentName} />} />`,
+        );
+        files[appFile] = appContent;
+        const msg = `ensureEntryPoint: guaranteed root route path="/" for ${componentName} in App.tsx`;
+        console.warn(`[Coder] ${msg}`);
+        warnings.push(msg);
+      }
+    }
+  }
+
+  const hasEntry = Object.keys(files).some((path) => ENTRY_FILE_PATTERN.test(path));
+  if (hasEntry) {
+    ensureBrowserRouter(files, warnings);
+    return warnings;
+  }
+
+  if (!appFile && pageFiles.length > 0) {
     const routeImports: string[] = [];
     const routeElements: string[] = [];
+
+    const homePage = pageFiles.find((p) => /home|index|landing/i.test(p)) || pageFiles[0];
+    const homeCompName = homePage.split('/').pop()!.replace(/\.(tsx|jsx)$/, '');
+
+    routeElements.push(`      <Route path="/" element={<${homeCompName} />} />`);
 
     for (const pagePath of pageFiles) {
       const componentName = pagePath.split('/').pop()!.replace(/\.(tsx|jsx)$/, '');
       const importPath = './' + pagePath.replace(/^src\//, '').replace(/\.(tsx|jsx)$/, '');
-      const routePath = '/' + componentName.toLowerCase().replace(/page$/i, '').replace(/index/i, '') || '/';
+      const cleanName = componentName.toLowerCase().replace(/page$/i, '').replace(/index/i, '');
+      const routePath = cleanName ? '/' + cleanName : '/';
       routeImports.push(`import ${componentName} from '${importPath}';`);
-      routeElements.push(`      <Route path="${routePath}" element={<${componentName} />} />`);
+      if (routePath !== '/') {
+        routeElements.push(`      <Route path="${routePath}" element={<${componentName} />} />`);
+      }
     }
 
     files['src/App.tsx'] = `import { Routes, Route } from 'react-router-dom';
@@ -494,8 +596,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   </React.StrictMode>,
 );
 `;
-    console.warn(`[Coder] Composed App.tsx with ${pageFiles.length} pages and BrowserRouter-wrapped main.tsx`);
-    return;
+    const msg = `ensureEntryPoint: composed App.tsx with ${pageFiles.length} pages and BrowserRouter-wrapped main.tsx`;
+    console.warn(`[Coder] ${msg}`);
+    warnings.push(msg);
+    return warnings;
   }
 
   const firstPage =
@@ -506,7 +610,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 
   if (!targetPath) {
     console.warn('[Coder] Could not find any component to wire up as the entry point — skipping entry-point fallback');
-    return;
+    return warnings;
   }
 
   const importPath = './' + targetPath.replace(/^src\//, '').replace(/\.(tsx|jsx)$/, '');
@@ -529,10 +633,13 @@ ${routerOpen}<${componentName} />${routerClose}
 );
 `;
 
-  console.warn(`[Coder] No entry point was generated — added src/main.tsx (rendering ${componentName}${needsRouter ? ' with BrowserRouter' : ''}) and src/index.css as a fallback`);
+  const fallbackMsg = `ensureEntryPoint: added fallback src/main.tsx (rendering ${componentName}${needsRouter ? ' with BrowserRouter' : ''})`;
+  console.warn(`[Coder] ${fallbackMsg}`);
+  warnings.push(fallbackMsg);
+  return warnings;
 }
 
-function ensureBrowserRouter(files: Record<string, string>): void {
+function ensureBrowserRouter(files: Record<string, string>, warnings: string[] = []): void {
   const mainEntry = Object.keys(files).find((p) => ENTRY_FILE_PATTERN.test(p));
   if (!mainEntry) return;
 
@@ -553,7 +660,9 @@ import { BrowserRouter } from 'react-router-dom';`,
 
   if (withRouter !== mainContent) {
     files[mainEntry] = withRouter;
-    console.warn(`[Coder] ensureBrowserRouter: wrapped existing ${mainEntry} render in <BrowserRouter>`);
+    const msg = `ensureBrowserRouter: wrapped existing ${mainEntry} render in <BrowserRouter>`;
+    console.warn(`[Coder] ${msg}`);
+    warnings.push(msg);
   }
 }
 
@@ -562,7 +671,6 @@ function ensureStylesheet(files: Record<string, string>): void {
   const CSS_PATH = 'src/index.css';
   const TAILWIND_DIRECTIVES = '@tailwind base;\n@tailwind components;\n@tailwind utilities;\n';
 
-  // 1. Create CSS file if missing
   if (!files[CSS_PATH]) {
     files[CSS_PATH] = TAILWIND_DIRECTIVES + '\nbody {\n  margin: 0;\n  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\n}\n';
     console.log('[Coder] ensureStylesheet: created src/index.css with Tailwind directives');
@@ -571,7 +679,6 @@ function ensureStylesheet(files: Record<string, string>): void {
     console.log('[Coder] ensureStylesheet: prepended Tailwind directives to existing src/index.css');
   }
 
-  // 2. Ensure main entry imports the CSS file
   const mainEntry = Object.keys(files).find((p) => ENTRY_FILE_PATTERN.test(p));
   if (!mainEntry) return;
 
@@ -583,86 +690,147 @@ function ensureStylesheet(files: Record<string, string>): void {
   console.log(`[Coder] ensureStylesheet: injected CSS import into ${mainEntry}`);
 }
 
-// ── 1d: guaranteed site-wide nav wiring ───────────────────────────────────────
+// Bug 6 fix: ensure SharedLayout contract ({children ?? <Outlet />})
 const LAYOUT_NAME_RE = /^src\/components\/(SharedLayout|AppLayout|Layout|Navbar|Navigation|NavBar|Header|AppShell)\.(tsx|jsx)$/i;
 
-function ensureSharedLayout(files: Record<string, string>): void {
+function ensureSharedLayout(files: Record<string, string>): string[] {
+  const warnings: string[] = [];
   const layoutFile = Object.keys(files).find((p) => LAYOUT_NAME_RE.test(p));
-  if (!layoutFile) return;
+  if (!layoutFile) return warnings;
 
   const layoutName = layoutFile.split('/').pop()!.replace(/\.(tsx|jsx)$/, '');
+
+  let layoutContent = files[layoutFile];
+  if (!layoutContent.includes('Outlet')) {
+    if (!layoutContent.includes("from 'react-router-dom'")) {
+      layoutContent = `import { Outlet } from 'react-router-dom';\n` + layoutContent;
+    } else {
+      layoutContent = layoutContent.replace(
+        /import\s*\{([^}]+)\}\s*from\s*['"]react-router-dom['"]/,
+        (m, syms) => `import { ${syms.trim()}, Outlet } from 'react-router-dom'`,
+      );
+    }
+  }
+  if (!layoutContent.includes('children') && !layoutContent.includes('<Outlet')) {
+    layoutContent = layoutContent.replace(
+      /(<main[^>]*>|<div[^>]*>)/,
+      `$1\n      {children ?? <Outlet />}`,
+    );
+    files[layoutFile] = layoutContent;
+    const msg = `ensureSharedLayout: made ${layoutName} render {children ?? <Outlet />}`;
+    console.warn(`[Coder] ${msg}`);
+    warnings.push(msg);
+  }
+
+  // Strip self-wrapping layout tags from individual page components
+  for (const [fp, content] of Object.entries(files)) {
+    if (fp === layoutFile) continue;
+    if (!/\/pages\//.test(fp)) continue;
+    if (!content.includes(layoutName)) continue;
+
+    const wrapRegex = new RegExp(`<${layoutName}[^>]*>([\\s\\S]*?)<\\/${layoutName}>`, 'g');
+    if (wrapRegex.test(content)) {
+      files[fp] = content.replace(wrapRegex, '$1');
+      const msg = `ensureSharedLayout: stripped self-wrapping <${layoutName}> from ${fp}`;
+      console.warn(`[Coder] ${msg}`);
+      warnings.push(msg);
+    }
+  }
+
   const appFile = Object.keys(files).find((p) => /^src\/App\.(tsx|jsx)$/.test(p));
-  if (!appFile) return;
-
-  const appContent = files[appFile];
-  // Already wired?
-  if (appContent.includes(layoutName)) return;
-  // Only wire when there's a <Routes> block to wrap
-  if (!appContent.includes('<Routes>')) return;
-
-  const importPath = './' + layoutFile.replace(/^src\//, '').replace(/\.(tsx|jsx)$/, '');
-  let newContent = appContent;
-
-  // Add import if missing
-  if (!newContent.includes(importPath)) {
-    newContent = `import ${layoutName} from '${importPath}';\n` + newContent;
+  if (appFile) {
+    const appContent = files[appFile];
+    if (!appContent.includes(layoutName) && appContent.includes('<Routes>')) {
+      const importPath = './' + layoutFile.replace(/^src\//, '').replace(/\.(tsx|jsx)$/, '');
+      let newContent = appContent;
+      if (!newContent.includes(importPath)) {
+        newContent = `import ${layoutName} from '${importPath}';\n` + newContent;
+      }
+      newContent = newContent.replace(
+        /(<Routes>[\s\S]*?<\/Routes>)/,
+        `<${layoutName}>\n      $1\n    </${layoutName}>`,
+      );
+      if (newContent !== appContent) {
+        files[appFile] = newContent;
+        const msg = `ensureSharedLayout: wired ${layoutName} around <Routes> in App.tsx`;
+        console.warn(`[Coder] ${msg}`);
+        warnings.push(msg);
+      }
+    }
   }
 
-  // Wrap <Routes>...</Routes> with the layout component
-  newContent = newContent.replace(
-    /(<Routes>[\s\S]*?<\/Routes>)/,
-    `<${layoutName}>\n      $1\n    </${layoutName}>`,
-  );
-
-  if (newContent !== appContent) {
-    files[appFile] = newContent;
-    console.log(`[Coder] ensureSharedLayout: wired ${layoutName} around <Routes> in App.tsx`);
-  }
+  return warnings;
 }
 
-// ── Part 1d: lightweight syntax-balance checker ───────────────────────────────
-function validateSyntaxBalance(code: string, filePath: string): { valid: boolean; error?: string } {
-  if (!/\.(tsx?|jsx?)$/.test(filePath)) return { valid: true };
+// Bug 7 & 8 fix: bare route paths, server port 3001, auth middleware stub
+function fixBackendRoutesAndServer(files: Record<string, string>): string[] {
+  const warnings: string[] = [];
 
-  let braces = 0, parens = 0, brackets = 0;
-  let inSingle = false, inDouble = false, inTemplate = 0;
+  for (const [fp, content] of Object.entries(files)) {
+    if (!/^(server|backend)\/routes\/[^\/]+\.js$/.test(fp)) continue;
+    const moduleName = fp.split('/').pop()!.replace(/\.js$/, '').toLowerCase();
 
-  for (let i = 0; i < code.length; i++) {
-    const ch = code[i];
-    const prev = i > 0 ? code[i - 1] : '';
-
-    if (!inSingle && !inDouble && inTemplate === 0 && ch === '`' && prev !== '\\') { inTemplate++; continue; }
-    if (inTemplate > 0) { if (ch === '`' && prev !== '\\') inTemplate--; continue; }
-    if (!inDouble && ch === "'" && prev !== '\\') { inSingle = !inSingle; continue; }
-    if (!inSingle && ch === '"' && prev !== '\\') { inDouble = !inDouble; continue; }
-    if (inSingle || inDouble) continue;
-
-    if (ch === '{') braces++;
-    else if (ch === '}') braces--;
-    else if (ch === '(') parens++;
-    else if (ch === ')') parens--;
-    else if (ch === '[') brackets++;
-    else if (ch === ']') brackets--;
+    const redundantPrefixRe = new RegExp(`(router\\.(?:get|post|put|delete|patch)\\s*\\(\\s*['"])\\/${moduleName}(\\/|['"])`, 'gi');
+    if (redundantPrefixRe.test(content)) {
+      const fixed = content.replace(redundantPrefixRe, '$1$2');
+      files[fp] = fixed;
+      const msg = `fixBackendRoutesAndServer: stripped redundant prefix "/${moduleName}" in ${fp} (routers use bare relative paths)`;
+      console.warn(`[Coder] ${msg}`);
+      warnings.push(msg);
+    }
   }
 
-  if (braces !== 0) return { valid: false, error: `Unbalanced braces (net: ${braces > 0 ? '+' : ''}${braces})` };
-  if (parens !== 0) return { valid: false, error: `Unbalanced parentheses (net: ${parens > 0 ? '+' : ''}${parens})` };
-  if (brackets !== 0) return { valid: false, error: `Unbalanced brackets (net: ${brackets > 0 ? '+' : ''}${brackets})` };
-  return { valid: true };
-}
+  const serverEntry = Object.keys(files).find((p) => /^(server|backend)\/(index|server)\.js$/.test(p));
+  if (serverEntry) {
+    let serverContent = files[serverEntry];
+    let changed = false;
 
-// ── Part 1c: create minimal stubs for missing local relative imports ───────────
-function resolveRelativeImport(fromFile: string, importPath: string): string {
-  const parts = fromFile.split('/');
-  parts.pop();
-  for (const seg of importPath.split('/')) {
-    if (seg === '..') parts.pop();
-    else if (seg !== '.') parts.push(seg);
+    if (serverContent.includes('5000')) {
+      serverContent = serverContent.replace(/\b5000\b/g, '3001');
+      changed = true;
+      const msg = `fixBackendRoutesAndServer: updated server port in ${serverEntry} to 3001 to match vite proxy`;
+      console.warn(`[Coder] ${msg}`);
+      warnings.push(msg);
+    }
+
+    const usesReqUser = Object.entries(files).some(([p, c]) => isBackendPath(p) && c.includes('req.user'));
+    if (usesReqUser && !serverContent.includes('req.user')) {
+      const authMiddleware = `\n// Injected stub authentication middleware\napp.use((req, res, next) => { req.user = req.user || { id: 1, email: 'demo@example.com' }; next(); });\n`;
+      serverContent = serverContent.replace(/(const app = express\(\);|express\(\);)/, `$1\n${authMiddleware}`);
+      changed = true;
+      const msg = `fixBackendRoutesAndServer: injected stub auth middleware (req.user = { id: 1 }) into ${serverEntry}`;
+      console.warn(`[Coder] ${msg}`);
+      warnings.push(msg);
+    }
+
+    if (changed) {
+      files[serverEntry] = serverContent;
+    }
   }
-  return parts.join('/');
+
+  return warnings;
 }
 
-function createMissingImportStubs(files: Record<string, string>): void {
+// Bug 9 fix: cleanup duplicate HTML shells
+function cleanupDuplicateHtmlFiles(files: Record<string, string>): string[] {
+  const warnings: string[] = [];
+  const htmlFiles = Object.keys(files).filter((p) => p.endsWith('.html'));
+
+  for (const p of htmlFiles) {
+    if (p !== 'index.html') {
+      delete files[p];
+      const msg = `cleanupDuplicateHtmlFiles: removed extra HTML shell at "${p}"`;
+      console.warn(`[Coder] ${msg}`);
+      warnings.push(msg);
+    }
+  }
+
+  return warnings;
+}
+
+// Bug 3 fix: create functional component stubs for missing local imports
+function createMissingImportStubs(files: Record<string, string>): string[] {
+  const warnings: string[] = [];
   const IMPORT_RE = /^(?:import\s+(?:[\s\S]*?from\s+)?|export\s+\{[^}]*\}\s+from\s+)['"](\.[\/]?[^'"]+)['"]/gm;
   const REQUIRE_RE = /require\s*\(\s*['"](\.[^'"]+)['"]\s*\)/g;
   const TRY_EXTS = ['', '.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js', '/index.jsx'];
@@ -681,14 +849,24 @@ function createMissingImportStubs(files: Record<string, string>): void {
         if (exists) continue;
 
         const ext = resolved.includes('.') ? resolved.split('.').pop()! : '';
+        const compName = (resolved.split('/').pop() || 'Placeholder').replace(/\.(tsx?|jsx?)$/, '');
+        const targetPath = (ext === 'tsx' || ext === 'jsx' || !ext) ? (resolved.endsWith('.tsx') ? resolved : `${resolved}.tsx`) : resolved;
+
         if (ext === 'css' || ext === 'scss' || ext === 'sass') {
-          stubs[resolved] = '/* auto-generated stub */\n';
-        } else if (['ts', 'tsx', 'js', 'jsx'].includes(ext)) {
-          stubs[resolved] = 'export {};\n';
-        } else if (!ext) {
-          stubs[resolved + '.tsx'] = 'export {};\n';
+          stubs[targetPath] = '/* auto-generated stub */\n';
+        } else if (ext === 'ts' || ext === 'js') {
+          stubs[targetPath] = 'export {};\n';
+        } else {
+          stubs[targetPath] =
+            `export default function ${compName}() {\n` +
+            `  return (\n` +
+            `    <div className="p-8">\n` +
+            `      <h2 className="text-xl font-semibold">${compName}</h2>\n` +
+            `      <p className="text-sm text-gray-500">This page has not been generated yet.</p>\n` +
+            `    </div>\n` +
+            `  );\n` +
+            `}\n`;
         }
-        // Unknown extension → skip
       }
     }
   }
@@ -696,9 +874,13 @@ function createMissingImportStubs(files: Record<string, string>): void {
   for (const [stubPath, content] of Object.entries(stubs)) {
     if (!(stubPath in files)) {
       files[stubPath] = content;
-      console.log(`[Coder] ⚠️ Created stub for missing local import: ${stubPath}`);
+      const msg = `createMissingImportStubs: created functional stub component for missing import ${stubPath}`;
+      console.warn(`[Coder] ⚠️ ${msg}`);
+      warnings.push(msg);
     }
   }
+
+  return warnings;
 }
 
 export class CoderAgent extends AgentBase {
@@ -721,13 +903,11 @@ export class CoderAgent extends AgentBase {
 
     let allGeneratedFiles: Record<string, string> = {};
 
-    // ── 1a: build version hints from planned package.json so prompts get exact versions ──
     const plannedPkg = (() => {
       try { return JSON.parse(buildConfigFileTemplates(requirements, architecture)['package.json'] || '{}'); }
       catch { return {}; }
     })();
     const versionHints = buildVersionHintsBlock(plannedPkg);
-    // ────────────────────────────────────────────────────────────────────────
 
     if (fileList.length > 0) {
       allGeneratedFiles = await this.generatePerFile(fileList, requirements, architecture, designDecisions, versionHints);
@@ -738,8 +918,6 @@ export class CoderAgent extends AgentBase {
 
     const configTemplates = buildConfigFileTemplates(requirements, architecture);
     allGeneratedFiles = { ...allGeneratedFiles, ...configTemplates };
-
-    ensureEntryPoint(allGeneratedFiles, architecture);
 
     if (Object.keys(allGeneratedFiles).length === 0) {
       throw new Error('Coder generated zero files');
@@ -754,25 +932,35 @@ export class CoderAgent extends AgentBase {
       ...integrationFiles,
     };
 
-    // ── 1b: React compat guard (react-data-grid vs React 18) ─────────────────
+    // ── Bug 10: Master Consistency & Quality Passes ──────────────────────────
+    const consistencyWarnings: string[] = [];
+
+    // Bug 9: Clean up junk extra index.html files
+    consistencyWarnings.push(...cleanupDuplicateHtmlFiles(allFiles));
+
+    // Bug 5: Strip nested Router wrappers outside main.tsx
+    consistencyWarnings.push(...stripExtraRouters(allFiles));
+
+    // Bug 6: Ensure SharedLayout contract ({children ?? <Outlet />})
+    consistencyWarnings.push(...ensureSharedLayout(allFiles));
+
+    // Bug 4: Ensure entry point & guaranteed root path "/"
+    consistencyWarnings.push(...ensureEntryPoint(allFiles, architecture));
+
+    // Bug 7 & 8: Fix backend route paths, server port 3001, auth stub, DB seeding
+    consistencyWarnings.push(...fixBackendRoutesAndServer(allFiles));
+
+    // Bug 1b: React compat guard (react-data-grid vs React 18)
     guardReactCompatibility(allFiles);
-    // ────────────────────────────────────────────────────────────────────────
 
-    // ── Bug 2 fix + 1b: reconcile deps, inject peers, validate named imports ─
-    reconcileDependencies(allFiles);
-    // ────────────────────────────────────────────────────────────────────────
+    // Bug 1: Reconcile dependencies & validate imports
+    consistencyWarnings.push(...reconcileDependencies(allFiles));
 
-    // ── 1c: guarantee stylesheet + CSS import in entry point ─────────────────
+    // Bug 1c: Guarantee stylesheet + index.css import
     ensureStylesheet(allFiles);
-    // ────────────────────────────────────────────────────────────────────────
 
-    // ── 1d: guarantee shared layout wired into App.tsx ───────────────────────
-    ensureSharedLayout(allFiles);
-    // ────────────────────────────────────────────────────────────────────────
-
-    // ── Part 1c: create stubs for any missing local relative imports ──────────
-    createMissingImportStubs(allFiles);
-    // ────────────────────────────────────────────────────────────────────────
+    // Bug 3: Create functional stubs for missing local imports
+    consistencyWarnings.push(...createMissingImportStubs(allFiles));
 
     console.log(`[Coder] Total files generated: ${Object.keys(allFiles).length}`);
     Object.keys(allFiles).forEach((f) => console.log(`  → ${f}`));
@@ -780,16 +968,21 @@ export class CoderAgent extends AgentBase {
     // ── Part 2: build self-healing loop (Node.js only, skipped on Workers) ───
     const healResult = await runBuildHeal(allFiles, this.callLLM.bind(this));
     const healedFiles = healResult.files;
-    if (healResult.buildWarnings.length > 0) {
-      healResult.buildWarnings.forEach((w) => console.warn(`[BuildHealer] ⚠️ ${w}`));
+
+    const allBuildWarnings = [
+      ...consistencyWarnings,
+      ...healResult.buildWarnings,
+    ];
+
+    if (allBuildWarnings.length > 0) {
+      allBuildWarnings.forEach((w) => console.warn(`[Coder Quality] ⚠️ ${w}`));
     }
-    // ────────────────────────────────────────────────────────────────────────
 
     return {
       success: true,
       agentName: 'coder',
       data: healedFiles,
-      ...(healResult.buildWarnings.length > 0 ? { warnings: healResult.buildWarnings } : {}),
+      ...(allBuildWarnings.length > 0 ? { warnings: allBuildWarnings } : {}),
     };
   }
 

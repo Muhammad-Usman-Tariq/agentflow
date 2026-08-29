@@ -180,9 +180,11 @@ RULES:
 - No placeholders or TODOs — write real, complete, working code.
 - If this is a schema file (schema.sql), match the given databaseSchema exactly
   (tables, columns, types, NOT NULL, PRIMARY KEY, FOREIGN KEY).
-- If this is a route handler file, implement the specific apiRoutes for this file,
-  reading/writing via the databaseSchema using the sql.js module described below.
-- If this is a seed file (seed.js), generate 5-10 rows per table of realistic,
+- ROUTE HANDLER RULES:
+  • Router files under server/routes/ MUST use bare paths relative to their mount point (e.g., router.get('/', ...), router.get('/:id', ...)).
+  • NEVER repeat the router module name inside the router file (e.g. NEVER router.get('/patient', ...) inside patient.js). server/index.js mounts each router at /api/<name>.
+  • Server entry point (server/index.js) MUST listen on port 3001 by default (matching vite.config.ts proxy).
+- If this is a seed file (seed.sql or seed.js), generate 5-10 rows per table of realistic,
   varied sample data (names, dates, emails — NOT "Test User 1" placeholders).
 ${SQLITE_RULES}
 `;

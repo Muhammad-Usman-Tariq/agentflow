@@ -274,6 +274,37 @@ export async function saveProjectForUser(id: string, title: string, messages: an
   }
 }
 
+// Bug 1 fix: files-only upsert used by the agent route.
+// On conflict: only updates the files column.
+// Never touches messages (owned by the client-side storeMessageHistory call).
+// Preserves existing title and user_id; applies fallback values only for brand-new rows.
+export async function saveProjectFilesOnly(
+  id: string,
+  fallbackTitle: string,
+  files: any,
+  fallbackUserId: string,
+  env?: Record<string, string>,
+) {
+  const filesJson = typeof files === 'string' ? files : JSON.stringify(files || {});
+
+  console.log('[DB saveFilesOnly] chat_id:', id, '| fallback_user_id:', fallbackUserId, '| fallback_title:', fallbackTitle);
+
+  const result = await query(
+    `INSERT INTO projects (chat_id, title, messages, files, user_id, updated_at)
+     VALUES ($1, $2, '[]'::jsonb, $3, $4, NOW())
+     ON CONFLICT (chat_id) DO UPDATE
+     SET files      = $3,
+         title      = COALESCE(NULLIF(projects.title, ''), EXCLUDED.title),
+         user_id    = COALESCE(projects.user_id, EXCLUDED.user_id),
+         updated_at = NOW()
+     RETURNING id`,
+    [id, fallbackTitle, filesJson, fallbackUserId],
+    env,
+  );
+  console.log('[DB saveFilesOnly] Saved row id:', result.rows[0]?.id);
+  return result.rows[0];
+}
+
 export async function getProjectForUser(id: string, userId: string, env?: Record<string, string>) {
   try {
     const result = await query(
@@ -313,4 +344,30 @@ export async function deleteProjectForUser(chatId: string, userId: string, env?:
     env
   );
   return result.rows[0];
+}
+
+// Bug 4 fix: after signup/login, claim any guest-owned projects so they appear
+// in the new account's sidebar. Only rows with user_id LIKE 'guest_%' are touched
+// — a real account's rows can never be claimed.
+export async function claimGuestProjects(
+  realUserId: string,
+  guestId: string,
+  env?: Record<string, string>,
+): Promise<number> {
+  try {
+    const result = await query(
+      `UPDATE projects
+       SET user_id = $1
+       WHERE user_id = $2 AND user_id LIKE 'guest_%'
+       RETURNING id`,
+      [realUserId, guestId],
+      env,
+    );
+    const claimed = result.rows.length;
+    console.log(`[DB claimGuestProjects] real_user: ${realUserId} | guest: ${guestId} | claimed: ${claimed} rows`);
+    return claimed;
+  } catch (e: any) {
+    console.error('[DB claimGuestProjects] Error:', e?.message);
+    return 0;
+  }
 }

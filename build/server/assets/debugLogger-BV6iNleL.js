@@ -1,4 +1,4 @@
-import { l as logger, D as DEFAULT_MODEL, P as PROVIDER_LIST } from './server-build-CY_Gu9K6.js';
+import { l as logger, D as DEFAULT_MODEL, P as PROVIDER_LIST } from './server-build-q7uh1MSp.js';
 import 'react/jsx-runtime';
 import '@remix-run/react';
 import 'isbot';
@@ -54,12 +54,12 @@ function isMobile() {
   return globalThis.innerWidth < 640;
 }
 
-const __vite_import_meta_env__ = {"BASE_URL": "/", "DEV": false, "LMSTUDIO_API_BASE_URL": "", "MODE": "production", "OLLAMA_API_BASE_URL": "", "OPENAI_LIKE_API_BASE_URL": "https://classics-locale-characterized-individually.trycloudflare.com/v1", "PROD": true, "SSR": true, "TOGETHER_API_BASE_URL": "", "VITE_GITHUB_ACCESS_TOKEN": "", "VITE_GITHUB_TOKEN_TYPE": "", "VITE_GITLAB_ACCESS_TOKEN": "", "VITE_GITLAB_TOKEN_TYPE": "personal-access-token", "VITE_GITLAB_URL": "https://gitlab.com", "VITE_LOG_LEVEL": "", "VITE_NETLIFY_ACCESS_TOKEN": "", "VITE_SUPABASE_ACCESS_TOKEN": "", "VITE_SUPABASE_ANON_KEY": "", "VITE_SUPABASE_URL": "", "VITE_VERCEL_ACCESS_TOKEN": ""};
+const __vite_import_meta_env__ = {"BASE_URL": "/", "DEV": false, "LMSTUDIO_API_BASE_URL": "", "MODE": "production", "OLLAMA_API_BASE_URL": "", "OPENAI_LIKE_API_BASE_URL": "https://loose-discretion-work-arthritis.trycloudflare.com/v1", "PROD": true, "SSR": true, "TOGETHER_API_BASE_URL": "", "VITE_GITHUB_ACCESS_TOKEN": "", "VITE_GITHUB_TOKEN_TYPE": "", "VITE_GITLAB_ACCESS_TOKEN": "", "VITE_GITLAB_TOKEN_TYPE": "personal-access-token", "VITE_GITLAB_URL": "https://gitlab.com", "VITE_LOG_LEVEL": "", "VITE_NETLIFY_ACCESS_TOKEN": "", "VITE_SUPABASE_ACCESS_TOKEN": "", "VITE_SUPABASE_ANON_KEY": "", "VITE_SUPABASE_URL": "", "VITE_VERCEL_ACCESS_TOKEN": ""};
 let logStore = null;
 const getLogStore = () => {
   if (!logStore && typeof window !== "undefined") {
     try {
-      import('./server-build-CY_Gu9K6.js').then(n => n.d).then(({ logStore: store }) => {
+      import('./server-build-q7uh1MSp.js').then(n => n.d).then(({ logStore: store }) => {
         logStore = store;
       }).catch(() => {
       });
@@ -530,7 +530,7 @@ class DebugLogger {
       const store = getLogStore();
       if (!store) {
         try {
-          const { logStore: storeModule } = await import('./server-build-CY_Gu9K6.js').then(n => n.d);
+          const { logStore: storeModule } = await import('./server-build-q7uh1MSp.js').then(n => n.d);
           logStore = storeModule;
           return this._getLogStoreLogs();
         } catch {

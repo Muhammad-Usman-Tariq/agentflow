@@ -139,7 +139,7 @@ let debugLogger = null;
 const getDebugLogger = () => {
   if (!debugLogger && typeof window !== "undefined") {
     try {
-      import('./debugLogger-BbEpjNye.js').then(({ debugLogger: loggerInstance }) => {
+      import('./debugLogger-BV6iNleL.js').then(({ debugLogger: loggerInstance }) => {
         debugLogger = loggerInstance;
       }).catch(() => {
       });
@@ -661,7 +661,7 @@ function App() {
       userAgent: navigator.userAgent,
       timestamp: (/* @__PURE__ */ new Date()).toISOString()
     });
-    import('./debugLogger-BbEpjNye.js').then(({ debugLogger }) => {
+    import('./debugLogger-BV6iNleL.js').then(({ debugLogger }) => {
       const status = debugLogger.getStatus();
       logStore.logSystem("Debug logging ready", {
         initialized: status.initialized,
@@ -7967,6 +7967,24 @@ async function saveProjectForUser(id, title, messages, files, userId, env) {
     }
   }
 }
+async function saveProjectFilesOnly(id, fallbackTitle, files, fallbackUserId, env) {
+  const filesJson = typeof files === "string" ? files : JSON.stringify(files || {});
+  console.log("[DB saveFilesOnly] chat_id:", id, "| fallback_user_id:", fallbackUserId, "| fallback_title:", fallbackTitle);
+  const result = await query(
+    `INSERT INTO projects (chat_id, title, messages, files, user_id, updated_at)
+     VALUES ($1, $2, '[]'::jsonb, $3, $4, NOW())
+     ON CONFLICT (chat_id) DO UPDATE
+     SET files      = $3,
+         title      = COALESCE(NULLIF(projects.title, ''), EXCLUDED.title),
+         user_id    = COALESCE(projects.user_id, EXCLUDED.user_id),
+         updated_at = NOW()
+     RETURNING id`,
+    [id, fallbackTitle, filesJson, fallbackUserId],
+    env
+  );
+  console.log("[DB saveFilesOnly] Saved row id:", result.rows[0]?.id);
+  return result.rows[0];
+}
 async function getProjectForUser(id, userId, env) {
   try {
     const result = await query(
@@ -8005,9 +8023,28 @@ async function deleteProjectForUser(chatId, userId, env) {
   );
   return result.rows[0];
 }
+async function claimGuestProjects(realUserId, guestId, env) {
+  try {
+    const result = await query(
+      `UPDATE projects
+       SET user_id = $1
+       WHERE user_id = $2 AND user_id LIKE 'guest_%'
+       RETURNING id`,
+      [realUserId, guestId],
+      env
+    );
+    const claimed = result.rows.length;
+    console.log(`[DB claimGuestProjects] real_user: ${realUserId} | guest: ${guestId} | claimed: ${claimed} rows`);
+    return claimed;
+  } catch (e) {
+    console.error("[DB claimGuestProjects] Error:", e?.message);
+    return 0;
+  }
+}
 
 const db_server = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({
   __proto__: null,
+  claimGuestProjects,
   createUser,
   deleteProjectForUser,
   emailExists,
@@ -8016,10 +8053,19 @@ const db_server = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty(
   getProjectForUser,
   getUserByEmail,
   query,
+  saveProjectFilesOnly,
   saveProjectForUser
 }, Symbol.toStringTag, { value: 'Module' }));
 
-const JWT_SECRET = process.env.JWT_SECRET || "bolt-diy-secret-key-change-in-production";
+if (!process.env.JWT_SECRET) {
+  throw new Error(
+    `[auth] JWT_SECRET is not set.
+Add JWT_SECRET=<random-64-char-string> to your .env.local (local dev) and to your
+hosting platform environment variables (deployed). See .env.example for instructions.
+Generate a value with: node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"'`
+  );
+}
+const JWT_SECRET = process.env.JWT_SECRET;
 async function hashPassword(password) {
   return bcrypt.hash(password, 12);
 }
@@ -8037,7 +8083,15 @@ function verifyToken(token) {
   }
 }
 
-const SESSION_SECRET = process.env.SESSION_SECRET || "bolt-session-secret-change-in-production";
+if (!process.env.SESSION_SECRET) {
+  throw new Error(
+    `[auth] SESSION_SECRET is not set.
+Add SESSION_SECRET=<random-64-char-string> to your .env.local (local dev) and to your
+hosting platform environment variables (deployed). See .env.example for instructions.
+Generate a value with: node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`
+  );
+}
+const SESSION_SECRET = process.env.SESSION_SECRET;
 const sessionStorage = createCookieSessionStorage({
   cookie: {
     name: "__bolt_session",
@@ -8108,6 +8162,13 @@ async function action$5({ request, context }) {
   }
   const passwordHash = await hashPassword(password);
   const user = await createUser(email, passwordHash, name, env);
+  const cookieHeader = request.headers.get("Cookie");
+  const guestMatch = cookieHeader?.match(/__bolt_guest_id=([^;]+)/);
+  if (guestMatch) {
+    const guestId = decodeURIComponent(guestMatch[1]);
+    const { claimGuestProjects } = await Promise.resolve().then(() => db_server);
+    await claimGuestProjects(String(user.id), guestId, env);
+  }
   const token = signToken({ userId: user.id, email: user.email, name: user.name });
   return createUserSession(token, "/");
 }
@@ -8561,6 +8622,13 @@ async function action$2({ request, context }) {
   const isValid = await verifyPassword(password, user.password_hash);
   if (!isValid) {
     return json({ error: "Invalid email or password" }, { status: 400 });
+  }
+  const cookieHeader = request.headers.get("Cookie");
+  const guestMatch = cookieHeader?.match(/__bolt_guest_id=([^;]+)/);
+  if (guestMatch) {
+    const guestId = decodeURIComponent(guestMatch[1]);
+    const { claimGuestProjects } = await Promise.resolve().then(() => db_server);
+    await claimGuestProjects(String(user.id), guestId, env);
   }
   const token = signToken({ userId: user.id, email: user.email, name: user.name });
   return createUserSession(token, "/");
@@ -9139,6 +9207,15 @@ You are a software architect. Design the FRONTEND file structure and UI componen
 FOLDER CONVENTION (required):
 - ALL frontend files (components, pages, config) go under "src/..." or the project root (e.g. "package.json", "index.html", "vite.config.ts").
 
+NAVIGATION RULE (required):
+- If the project has more than one page or route, you MUST include exactly ONE shared
+  layout/navigation component in the components list:
+  { "name": "SharedLayout", "filePath": "src/components/SharedLayout.tsx",
+    "props": [], "dependencies": ["react-router-dom"] }
+  This component renders a persistent top navigation bar (with <Link> elements to every
+  planned route) plus a content area where child routes are displayed.
+  Do NOT omit it — its absence produces disconnected, unnavigable pages.
+
 Return ONLY this JSON:
 {
   "fileStructure": [{"path": "string", "type": "file", "purpose": "string"}],
@@ -9268,6 +9345,11 @@ function synthesizeBackendFiles(apiRoutes, databaseType, databaseSchema) {
         path: "server/database/schema.sql",
         type: "file",
         purpose: "Relational database schema DDL (tables, columns, foreign keys)"
+      });
+      backendEntries.push({
+        path: "server/database/seed.js",
+        type: "file",
+        purpose: "Seed script — inserts 5-10 realistic sample rows per table so the preview shows real data on first load"
       });
     }
   }
@@ -9415,6 +9497,33 @@ Return ONLY this JSON:
 const BACKEND_CODER_USER_PROMPT = (architecture) => `Build the BACKEND and DATABASE for this project:
 Architecture (apiRoutes/databaseType/databaseSchema — implement these exactly): ${JSON.stringify(architecture)}
 Write ALL backend route files and database schema files described in the architecture. Return JSON only.`;
+const FRONTEND_VERSION_RULES = `
+VERSION-PINNED API RULES — these override anything from your training data:
+• react-dom 18: ReactDOM.createRoot(document.getElementById('root')!).render(<App/>)
+  NEVER use ReactDOM.render() — that is the React 17 API and will crash on React 18.
+• react-hook-form v7: const { register, handleSubmit, formState: { errors } } = useForm()
+  Spread register: {...register('fieldName')}  — NEVER ref={register('fieldName')} (v6 API).
+• react-router-dom v6: <Routes><Route path="/" element={<Home/>}/></Routes>
+  Navigation: useNavigate() -> const nav = useNavigate(); nav('/path')
+  NEVER useHistory() — that was removed in v6.
+• BrowserRouter: ONE BrowserRouter lives in src/main.tsx only. NEVER add a second one
+  inside App.tsx or any component — it causes "You cannot render a <Router> inside
+  another <Router>" crash.
+• Named imports: only import symbols that actually exist in the package. Do not invent
+  export names (e.g. react-data-grid does NOT export Grid or Table).
+`;
+function buildVersionHintsBlock(pkgJson) {
+  const allDeps = {
+    ...pkgJson?.dependencies || {},
+    ...pkgJson?.devDependencies || {}
+  };
+  if (Object.keys(allDeps).length === 0) return "";
+  const lines = Object.entries(allDeps).map(([k, v]) => `  "${k}": "${v}"`).join("\n");
+  return `Exact installed versions (write code that works with THESE versions, not any other):
+{
+${lines}
+}`;
+}
 const FRONTEND_FILE_SYSTEM_PROMPT = `
 You are an expert frontend developer. Write the complete, working code for
 ONE specific file in a larger project, based on the architecture you're given.
@@ -9429,20 +9538,38 @@ RULES:
 - If this file needs to call a backend API route, use fetch (e.g. fetch('/api/...')).
 - Stay consistent with the full project file list and components list you're
   given, so imports between files line up correctly.
+${FRONTEND_VERSION_RULES}
 `;
-const FRONTEND_FILE_USER_PROMPT = (requirements, architecture, designDecisions, filePath, purpose) => `Project requirements: ${JSON.stringify(requirements)}
+const FRONTEND_FILE_USER_PROMPT = (requirements, architecture, designDecisions, filePath, purpose, versionHints) => `Project requirements: ${JSON.stringify(requirements)}
 Full project file list (for import consistency — you are only writing ONE of these files right now): ${JSON.stringify(
   (architecture?.fileStructure || []).map((f) => f.path)
 )}
 Components in this project: ${JSON.stringify(architecture?.components || [])}
 API routes this frontend may call: ${JSON.stringify(architecture?.apiRoutes || [])}
 Design decisions: ${JSON.stringify(designDecisions)}
-
+` + (versionHints ? `
+${versionHints}
+` : "") + `
 Write the COMPLETE content of this ONE file:
 Path: ${filePath}
 Purpose: ${purpose}
 
 Output only the raw file content, nothing else.`;
+const SQLITE_RULES = `
+DATABASE — this project uses sql.js (embedded SQLite, no external DB required):
+• Import the shared module:  import { getDb, persistDb } from '../database/db.js';
+  (adjust relative path based on this file's location under server/)
+• Query:
+    const db = await getDb();
+    const res = db.exec('SELECT * FROM t WHERE id = ?', [id]);
+    const cols = res[0]?.columns ?? [];
+    const rows = (res[0]?.values ?? []).map(r => Object.fromEntries(cols.map((c,i)=>[c,r[i]])));
+• Write:
+    db.run('INSERT INTO t (a, b) VALUES (?, ?)', [v1, v2]);
+    persistDb();   // call after every write
+• NEVER import or use pg, Pool, Client, DATABASE_URL, or any Postgres connection string.
+• sql.js exec() returns [] on no match — always guard with ?. (optional chaining).
+`;
 const BACKEND_FILE_SYSTEM_PROMPT = `
 You are an expert backend developer. Write the complete, working code for ONE
 specific backend or database file in a larger project, based on the
@@ -9452,18 +9579,25 @@ RULES:
 - Output ONLY the raw file content. No JSON, no markdown code fences, no
   explanation — start directly with the file's actual first character.
 - No placeholders or TODOs — write real, complete, working code.
-- If this is a database schema/migration file, match the given databaseSchema
-  exactly (tables/collections, fields, types, foreign keys/relations).
-- If this is a route handler file, implement the specific apiRoutes it's
-  responsible for, reading/writing via the given databaseSchema.
+- If this is a schema file (schema.sql), match the given databaseSchema exactly
+  (tables, columns, types, NOT NULL, PRIMARY KEY, FOREIGN KEY).
+- ROUTE HANDLER RULES:
+  • Router files under server/routes/ MUST use bare paths relative to their mount point (e.g., router.get('/', ...), router.get('/:id', ...)).
+  • NEVER repeat the router module name inside the router file (e.g. NEVER router.get('/patient', ...) inside patient.js). server/index.js mounts each router at /api/<name>.
+  • Server entry point (server/index.js) MUST listen on port 3001 by default (matching vite.config.ts proxy).
+- If this is a seed file (seed.sql or seed.js), generate 5-10 rows per table of realistic,
+  varied sample data (names, dates, emails — NOT "Test User 1" placeholders).
+${SQLITE_RULES}
 `;
-const BACKEND_FILE_USER_PROMPT = (architecture, filePath, purpose) => `Database type: ${architecture?.databaseType}
+const BACKEND_FILE_USER_PROMPT = (architecture, filePath, purpose, versionHints) => `Database type: ${architecture?.databaseType}
 Database schema: ${JSON.stringify(architecture?.databaseSchema || [])}
 API routes: ${JSON.stringify(architecture?.apiRoutes || [])}
 Full project file list (for reference): ${JSON.stringify(
   (architecture?.fileStructure || []).map((f) => f.path)
 )}
-
+` + (versionHints ? `
+${versionHints}
+` : "") + `
 Write the COMPLETE content of this ONE file:
 Path: ${filePath}
 Purpose: ${purpose}
@@ -9474,6 +9608,28 @@ const MAX_HEAL_ROUNDS = 3;
 const NPM_INSTALL_TIMEOUT_MS = 12e4;
 const NPM_BUILD_TIMEOUT_MS = 9e4;
 const LLM_FIX_TIMEOUT_MS = 6e4;
+const VALID_PKG_RE$1 = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i;
+function isValidPackageName$1(name) {
+  return VALID_PKG_RE$1.test(name) && name.length <= 214 && !/\s/.test(name) && !name.includes("..");
+}
+function sanitizePackageJsonDeps(pkgJsonContent) {
+  const stripped = [];
+  try {
+    const pkg = JSON.parse(pkgJsonContent);
+    for (const section of ["dependencies", "devDependencies"]) {
+      if (!pkg[section]) continue;
+      for (const key of Object.keys(pkg[section])) {
+        if (!isValidPackageName$1(key)) {
+          delete pkg[section][key];
+          stripped.push(key);
+        }
+      }
+    }
+    return { content: JSON.stringify(pkg, null, 2), stripped };
+  } catch {
+    return { content: pkgJsonContent, stripped: [] };
+  }
+}
 async function runBuildHeal(files, callLLM) {
   const warnings = [];
   let cp = null;
@@ -9491,7 +9647,26 @@ async function runBuildHeal(files, callLLM) {
   }
   const tmpBase = pathMod.join(osMod.tmpdir(), `agentflow-build-${Date.now()}`);
   let currentFiles = { ...files };
+  let lastFilesHash = "";
   for (let round = 1; round <= MAX_HEAL_ROUNDS; round++) {
+    const currentFilesHash = JSON.stringify(currentFiles);
+    if (round > 1 && currentFilesHash === lastFilesHash) {
+      console.warn(`[BuildHealer] Aborting heal loop at round ${round} — files were unchanged from previous round`);
+      warnings.push(`BuildHealer: Aborted retry loop at round ${round} because input files were unchanged.`);
+      break;
+    }
+    lastFilesHash = currentFilesHash;
+    if (currentFiles["package.json"]) {
+      const { content, stripped } = sanitizePackageJsonDeps(currentFiles["package.json"]);
+      if (stripped.length > 0) {
+        currentFiles["package.json"] = content;
+        for (const badPkg of stripped) {
+          const msg = `BuildHealer: stripped invalid package "${badPkg}" from package.json`;
+          console.warn(`[BuildHealer] ${msg}`);
+          warnings.push(msg);
+        }
+      }
+    }
     console.log(
       `[BuildHealer] Round ${round}/${MAX_HEAL_ROUNDS} — writing ${Object.keys(currentFiles).length} files to temp dir`
     );
@@ -9515,11 +9690,35 @@ async function runBuildHeal(files, callLLM) {
       NPM_INSTALL_TIMEOUT_MS
     );
     if (!installResult.success) {
-      const snippet = (installResult.stderr + installResult.stdout).slice(0, 500);
+      const output = installResult.stderr + installResult.stdout;
+      const snippet = output.slice(0, 500);
       console.warn(`[BuildHealer] npm install failed (round ${round}): ${snippet}`);
+      let strippedAny = false;
+      if (currentFiles["package.json"]) {
+        const notFoundMatch = output.match(/npm ERR! 404\s+['"]?([^'":\n]+)['"]?/i) || output.match(/No matching version found for ([^@\n\s]+)/i);
+        if (notFoundMatch && notFoundMatch[1]) {
+          const badPkg = notFoundMatch[1].trim();
+          try {
+            const pkg = JSON.parse(currentFiles["package.json"]);
+            if (pkg.dependencies?.[badPkg] || pkg.devDependencies?.[badPkg]) {
+              delete pkg.dependencies?.[badPkg];
+              delete pkg.devDependencies?.[badPkg];
+              currentFiles["package.json"] = JSON.stringify(pkg, null, 2);
+              strippedAny = true;
+              const msg = `BuildHealer: stripped failing package "${badPkg}" from package.json`;
+              console.warn(`[BuildHealer] ${msg}`);
+              warnings.push(msg);
+            }
+          } catch {
+          }
+        }
+      }
       if (round === MAX_HEAL_ROUNDS) {
         warnings.push(`BuildHealer: npm install still failing after ${MAX_HEAL_ROUNDS} rounds.
 ${snippet}`);
+      }
+      if (!strippedAny) {
+        break;
       }
       continue;
     }
@@ -9668,7 +9867,8 @@ function buildConfigFileTemplates(requirements, architecture) {
         express: "^4.19.2",
         cors: "^2.8.5",
         dotenv: "^16.4.5",
-        pg: "^8.11.5"
+        // ── Part 2: sql.js replaces pg — pure WASM, works in WebContainer ──
+        "sql.js": "^1.12.0"
       } : {}
     },
     devDependencies: {
@@ -9707,9 +9907,44 @@ export default defineConfig({
   },
 });
 `;
+  const sqliteDbModule = needsBackend && architecture?.databaseType !== "non-relational" ? `// Auto-generated SQLite initializer — do not edit manually
+import initSqlJs from 'sql.js';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dir = dirname(fileURLToPath(import.meta.url));
+const DB_PATH = join(__dir, 'app.sqlite');
+const SCHEMA_PATH = join(__dir, 'schema.sql');
+
+let _db = null;
+
+export async function getDb() {
+  if (_db) return _db;
+  const SQL = await initSqlJs();
+  if (existsSync(DB_PATH)) {
+    _db = new SQL.Database(readFileSync(DB_PATH));
+  } else {
+    _db = new SQL.Database();
+    if (existsSync(SCHEMA_PATH)) {
+      const schema = readFileSync(SCHEMA_PATH, 'utf8');
+      _db.run(schema);
+    }
+    persistDb();
+  }
+  return _db;
+}
+
+export function persistDb() {
+  if (!_db) return;
+  mkdirSync(dirname(DB_PATH), { recursive: true });
+  writeFileSync(DB_PATH, Buffer.from(_db.export()));
+}
+` : null;
   return {
     "package.json": JSON.stringify(packageJson, null, 2),
     "vite.config.ts": viteConfig,
+    ...sqliteDbModule ? { "server/database/db.js": sqliteDbModule } : {},
     "tsconfig.json": JSON.stringify(
       {
         compilerOptions: {
@@ -9777,7 +10012,11 @@ const KNOWN_VERSIONS = {
   "react-icons": "^5.1.0",
   "@headlessui/react": "^2.1.2",
   "@mui/material": "^5.15.19",
+  "@mui/system": "^5.15.19",
   "@mui/icons-material": "^5.15.19",
+  "@mui/x-data-grid": "^7.7.1",
+  "@mui/x-date-pickers": "^7.7.1",
+  "@mui/lab": "^5.0.0-alpha.170",
   "@emotion/react": "^11.11.4",
   "@emotion/styled": "^11.11.5",
   "framer-motion": "^11.1.9",
@@ -9807,36 +10046,105 @@ const KNOWN_VERSIONS = {
   "socket.io": "^4.7.5",
   "socket.io-client": "^4.7.5",
   "multer": "^1.4.5-lts.1",
-  "sharp": "^0.33.3"
+  "sharp": "^0.33.3",
+  "sql.js": "^1.12.0"
 };
+const PEER_DEPS_MAP = {
+  "@mui/x-data-grid": { "@mui/material": "^5.15.19", "@mui/system": "^5.15.19", "@emotion/react": "^11.11.4", "@emotion/styled": "^11.11.5" },
+  "@mui/x-date-pickers": { "@mui/material": "^5.15.19", "@emotion/react": "^11.11.4", "@emotion/styled": "^11.11.5" },
+  "@mui/lab": { "@mui/material": "^5.15.19", "@emotion/react": "^11.11.4", "@emotion/styled": "^11.11.5" },
+  "@mui/icons-material": { "@mui/material": "^5.15.19" },
+  "react-chartjs-2": { "chart.js": "^4.4.2" }
+};
+const INVALID_EXPORTS = {
+  "react-data-grid": /* @__PURE__ */ new Set(["Grid", "Table", "Column"]),
+  "@mui/x-data-grid": /* @__PURE__ */ new Set(["Grid", "Table"])
+};
+const EXPORT_REMAP = {
+  "react-data-grid": { Grid: "DataGrid", Table: "DataGrid", Column: "GridColDef" }
+};
+const VALID_PKG_RE = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i;
+function isValidPackageName(name) {
+  return VALID_PKG_RE.test(name) && name.length <= 214 && !/\s/.test(name) && !name.includes("..");
+}
+function guardReactCompatibility(files) {
+  if (!files["package.json"]) return;
+  let pkg;
+  try {
+    pkg = JSON.parse(files["package.json"]);
+  } catch {
+    return;
+  }
+  const reactVer = pkg.dependencies?.["react"] || pkg.devDependencies?.["react"] || "";
+  const isReact18 = reactVer.includes("18");
+  if (isReact18 && pkg.dependencies?.["react-data-grid"]) {
+    console.warn("[Coder] guardReactCompatibility: react-data-grid requires React 19 — swapping to @mui/x-data-grid");
+    delete pkg.dependencies["react-data-grid"];
+    pkg.dependencies["@mui/x-data-grid"] = KNOWN_VERSIONS["@mui/x-data-grid"];
+    pkg.dependencies["@mui/material"] = KNOWN_VERSIONS["@mui/material"];
+    pkg.dependencies["@mui/system"] = KNOWN_VERSIONS["@mui/system"];
+    pkg.dependencies["@emotion/react"] = KNOWN_VERSIONS["@emotion/react"];
+    pkg.dependencies["@emotion/styled"] = KNOWN_VERSIONS["@emotion/styled"];
+    files["package.json"] = JSON.stringify(pkg, null, 2);
+    for (const [fp, content] of Object.entries(files)) {
+      if (!/\.(tsx?|jsx?)$/.test(fp)) continue;
+      if (!content.includes("react-data-grid")) continue;
+      let fixed = content.replace(
+        /import\s*\{[^}]*\}\s*from\s*['"]react-data-grid['"];?/g,
+        "import { DataGrid } from '@mui/x-data-grid';"
+      ).replace(/<Grid(\s)/g, "<DataGrid$1").replace(/<Table(\s)/g, "<DataGrid$1").replace(/<\/Grid>/g, "</DataGrid>").replace(/<\/Table>/g, "</DataGrid>");
+      files[fp] = fixed;
+      console.log(`[Coder] guardReactCompatibility: fixed react-data-grid imports in ${fp}`);
+    }
+  }
+}
 function reconcileDependencies(files) {
+  const warnings = [];
   const sourceFiles = Object.entries(files).filter(
     ([p]) => /\.(ts|tsx|js|jsx|mjs|cjs)$/.test(p) && p !== "vite.config.ts" && p !== "postcss.config.js" && p !== "tailwind.config.js"
   );
   const detectedPackages = /* @__PURE__ */ new Set();
-  const importPattern = /^import\s[\s\S]*?['"]([^./][^'"]*)['"];?$/gm;
+  const importPattern = /^\s*import\s+(?:[^'"\n]*?\s+from\s+)?['"]([^'"]+)['"]\s*;?\s*$/gm;
   const requirePattern = /require\(['"]((?:@[^/]+\/)?[^/.'"@][^'"]*?)['"]/g;
   for (const [, content] of sourceFiles) {
     let m;
     importPattern.lastIndex = 0;
     while ((m = importPattern.exec(content)) !== null) {
       const spec = m[1];
+      if (spec.startsWith(".")) continue;
       const pkgName = spec.startsWith("@") ? spec.split("/").slice(0, 2).join("/") : spec.split("/")[0];
-      if (pkgName && !pkgName.startsWith(".")) detectedPackages.add(pkgName);
+      if (pkgName) {
+        if (isValidPackageName(pkgName)) {
+          detectedPackages.add(pkgName);
+        } else {
+          const msg = `reconcileDependencies: rejected invalid package candidate "${pkgName}"`;
+          console.warn(`[Coder] ${msg}`);
+          warnings.push(msg);
+        }
+      }
     }
     requirePattern.lastIndex = 0;
     while ((m = requirePattern.exec(content)) !== null) {
       const spec = m[1];
+      if (spec.startsWith(".")) continue;
       const pkgName = spec.startsWith("@") ? spec.split("/").slice(0, 2).join("/") : spec.split("/")[0];
-      if (pkgName && !pkgName.startsWith(".")) detectedPackages.add(pkgName);
+      if (pkgName) {
+        if (isValidPackageName(pkgName)) {
+          detectedPackages.add(pkgName);
+        } else {
+          const msg = `reconcileDependencies: rejected invalid package candidate "${pkgName}"`;
+          console.warn(`[Coder] ${msg}`);
+          warnings.push(msg);
+        }
+      }
     }
   }
-  if (!files["package.json"]) return;
+  if (!files["package.json"]) return warnings;
   let pkgJson;
   try {
     pkgJson = JSON.parse(files["package.json"]);
   } catch {
-    return;
+    return warnings;
   }
   const allDeclared = /* @__PURE__ */ new Set([
     ...Object.keys(pkgJson.dependencies || {}),
@@ -9853,34 +10161,132 @@ function reconcileDependencies(files) {
     const version = KNOWN_VERSIONS[pkg] || "*";
     pkgJson.dependencies[pkg] = version;
     injected++;
-    console.log(`[Coder] reconcileDependencies: added missing dep "${pkg}": "${version}"`);
+    const msg = `reconcileDependencies: added missing dep "${pkg}": "${version}"`;
+    console.log(`[Coder] ${msg}`);
+    warnings.push(msg);
+    const peers = PEER_DEPS_MAP[pkg];
+    if (peers) {
+      for (const [peer, peerVersion] of Object.entries(peers)) {
+        if (!pkgJson.dependencies[peer] && !pkgJson.devDependencies?.[peer]) {
+          pkgJson.dependencies[peer] = peerVersion;
+          injected++;
+          const peerMsg = `reconcileDependencies: added peer dep "${peer}": "${peerVersion}" (required by "${pkg}")`;
+          console.log(`[Coder] ${peerMsg}`);
+          warnings.push(peerMsg);
+        }
+      }
+    }
   }
   if (injected > 0) {
     files["package.json"] = JSON.stringify(pkgJson, null, 2);
-    console.log(`[Coder] reconcileDependencies: injected ${injected} missing package(s) into package.json`);
   }
+  const NAMED_IMPORT_RE = /import\s*\{([^}]+)\}\s*from\s*['"]((?:@[^/]+\/)?[^/.'"][^'"]*)['"]/g;
+  for (const [fp, content] of Object.entries(files)) {
+    if (!/\.(tsx?|jsx?)$/.test(fp)) continue;
+    let updated = content;
+    let fileChanged = false;
+    NAMED_IMPORT_RE.lastIndex = 0;
+    let m;
+    while ((m = NAMED_IMPORT_RE.exec(content)) !== null) {
+      const importedNames = m[1].split(",").map((s) => s.trim().split(/\s+as\s+/)[0].trim());
+      const pkgName = m[2].startsWith("@") ? m[2].split("/").slice(0, 2).join("/") : m[2].split("/")[0];
+      const invalids = INVALID_EXPORTS[pkgName];
+      const remaps = EXPORT_REMAP[pkgName];
+      if (!invalids && !remaps) continue;
+      for (const name of importedNames) {
+        if (invalids?.has(name)) {
+          const replacement = remaps?.[name] || "DataGrid";
+          const msg = `validateNamedImports: "${name}" does not exist in "${pkgName}" — remapping to "${replacement}" in ${fp}`;
+          console.warn(`[Coder] ${msg}`);
+          warnings.push(msg);
+          updated = updated.replace(new RegExp(`\\b${name}\\b`, "g"), replacement);
+          fileChanged = true;
+        }
+      }
+    }
+    if (fileChanged) {
+      files[fp] = updated;
+    }
+  }
+  return warnings;
+}
+function stripExtraRouters(files) {
+  const warnings = [];
+  const mainEntry = Object.keys(files).find((p) => ENTRY_FILE_PATTERN.test(p));
+  for (const [fp, content] of Object.entries(files)) {
+    if (fp === mainEntry) continue;
+    if (!/\.(tsx?|jsx?)$/.test(fp)) continue;
+    if (!content.includes("BrowserRouter") && !content.includes("HashRouter")) continue;
+    let updated = content;
+    updated = updated.replace(/import\s*\{[^}]*\b(BrowserRouter|HashRouter)\b[^}]*\}\s*from\s*['"]react-router-dom['"];?\r?\n?/g, (match) => {
+      const symbols = match.match(/\{([^}]+)\}/)?.[1] || "";
+      const remaining = symbols.split(",").map((s) => s.trim()).filter((s) => s && s !== "BrowserRouter" && s !== "HashRouter");
+      return remaining.length > 0 ? `import { ${remaining.join(", ")} } from 'react-router-dom';
+` : "";
+    });
+    updated = updated.replace(/<BrowserRouter[^>]*>([\s\S]*?)<\/BrowserRouter>/g, "$1");
+    updated = updated.replace(/<HashRouter[^>]*>([\s\S]*?)<\/HashRouter>/g, "$1");
+    if (updated !== content) {
+      files[fp] = updated;
+      const msg = `stripExtraRouters: removed nested Router wrapper from ${fp} (BrowserRouter belongs in main.tsx only)`;
+      console.warn(`[Coder] ${msg}`);
+      warnings.push(msg);
+    }
+  }
+  return warnings;
 }
 function ensureEntryPoint(files, architecture) {
-  const hasEntry = Object.keys(files).some((path) => ENTRY_FILE_PATTERN.test(path));
-  if (hasEntry) {
-    ensureBrowserRouter(files);
-    return;
-  }
+  const warnings = [];
   const pageFiles = Object.keys(files).filter((p) => /\/pages\//.test(p) && /\.(tsx|jsx)$/.test(p)).sort();
   const hasCss = Object.keys(files).some((p) => p === "src/index.css");
   if (!hasCss) {
     files["src/index.css"] = "@tailwind base;\n@tailwind components;\n@tailwind utilities;\n";
   }
   const appFile = Object.keys(files).find((p) => /^src\/App\.(tsx|jsx)$/.test(p));
-  if (!appFile && pageFiles.length > 1) {
+  if (appFile) {
+    let appContent = files[appFile];
+    const hasRootRoute = /<Route\s+[^>]*path=["']\/["']/i.test(appContent);
+    if (!hasRootRoute && appContent.includes("<Routes>")) {
+      const homePage = pageFiles.find((p) => /home|index|landing/i.test(p)) || pageFiles[0];
+      if (homePage) {
+        const componentName2 = homePage.split("/").pop().replace(/\.(tsx|jsx)$/, "");
+        const importPath2 = "./" + homePage.replace(/^src\//, "").replace(/\.(tsx|jsx)$/, "");
+        if (!appContent.includes(importPath2)) {
+          appContent = `import ${componentName2} from '${importPath2}';
+` + appContent;
+        }
+        appContent = appContent.replace(
+          /(<Routes>)/,
+          `$1
+        <Route path="/" element={<${componentName2} />} />`
+        );
+        files[appFile] = appContent;
+        const msg = `ensureEntryPoint: guaranteed root route path="/" for ${componentName2} in App.tsx`;
+        console.warn(`[Coder] ${msg}`);
+        warnings.push(msg);
+      }
+    }
+  }
+  const hasEntry = Object.keys(files).some((path) => ENTRY_FILE_PATTERN.test(path));
+  if (hasEntry) {
+    ensureBrowserRouter(files, warnings);
+    return warnings;
+  }
+  if (!appFile && pageFiles.length > 0) {
     const routeImports = [];
     const routeElements = [];
+    const homePage = pageFiles.find((p) => /home|index|landing/i.test(p)) || pageFiles[0];
+    const homeCompName = homePage.split("/").pop().replace(/\.(tsx|jsx)$/, "");
+    routeElements.push(`      <Route path="/" element={<${homeCompName} />} />`);
     for (const pagePath of pageFiles) {
       const componentName2 = pagePath.split("/").pop().replace(/\.(tsx|jsx)$/, "");
       const importPath2 = "./" + pagePath.replace(/^src\//, "").replace(/\.(tsx|jsx)$/, "");
-      const routePath = "/" + componentName2.toLowerCase().replace(/page$/i, "").replace(/index/i, "") || "/";
+      const cleanName = componentName2.toLowerCase().replace(/page$/i, "").replace(/index/i, "");
+      const routePath = cleanName ? "/" + cleanName : "/";
       routeImports.push(`import ${componentName2} from '${importPath2}';`);
-      routeElements.push(`      <Route path="${routePath}" element={<${componentName2} />} />`);
+      if (routePath !== "/") {
+        routeElements.push(`      <Route path="${routePath}" element={<${componentName2} />} />`);
+      }
     }
     files["src/App.tsx"] = `import { Routes, Route } from 'react-router-dom';
 ${routeImports.join("\n")}
@@ -9907,14 +10313,16 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   </React.StrictMode>,
 );
 `;
-    console.warn(`[Coder] Composed App.tsx with ${pageFiles.length} pages and BrowserRouter-wrapped main.tsx`);
-    return;
+    const msg = `ensureEntryPoint: composed App.tsx with ${pageFiles.length} pages and BrowserRouter-wrapped main.tsx`;
+    console.warn(`[Coder] ${msg}`);
+    warnings.push(msg);
+    return warnings;
   }
   const firstPage = architecture?.fileStructure?.find((f) => /\/pages\//.test(f.path) && /\.(tsx|jsx)$/.test(f.path))?.path || pageFiles[0];
   const targetPath = appFile || firstPage;
   if (!targetPath) {
     console.warn("[Coder] Could not find any component to wire up as the entry point — skipping entry-point fallback");
-    return;
+    return warnings;
   }
   const importPath = "./" + targetPath.replace(/^src\//, "").replace(/\.(tsx|jsx)$/, "");
   const componentName = targetPath.split("/").pop().replace(/\.(tsx|jsx)$/, "");
@@ -9934,9 +10342,12 @@ ${routerOpen}<${componentName} />${routerClose}
   </React.StrictMode>,
 );
 `;
-  console.warn(`[Coder] No entry point was generated — added src/main.tsx (rendering ${componentName}${needsRouter ? " with BrowserRouter" : ""}) and src/index.css as a fallback`);
+  const fallbackMsg = `ensureEntryPoint: added fallback src/main.tsx (rendering ${componentName}${needsRouter ? " with BrowserRouter" : ""})`;
+  console.warn(`[Coder] ${fallbackMsg}`);
+  warnings.push(fallbackMsg);
+  return warnings;
 }
-function ensureBrowserRouter(files) {
+function ensureBrowserRouter(files, warnings = []) {
   const mainEntry = Object.keys(files).find((p) => ENTRY_FILE_PATTERN.test(p));
   if (!mainEntry) return;
   const mainContent = files[mainEntry];
@@ -9956,55 +10367,156 @@ import { BrowserRouter } from 'react-router-dom';`
   );
   if (withRouter !== mainContent) {
     files[mainEntry] = withRouter;
-    console.warn(`[Coder] ensureBrowserRouter: wrapped existing ${mainEntry} render in <BrowserRouter>`);
+    const msg = `ensureBrowserRouter: wrapped existing ${mainEntry} render in <BrowserRouter>`;
+    console.warn(`[Coder] ${msg}`);
+    warnings.push(msg);
   }
 }
-function validateSyntaxBalance(code, filePath) {
-  if (!/\.(tsx?|jsx?)$/.test(filePath)) return { valid: true };
-  let braces = 0, parens = 0, brackets = 0;
-  let inSingle = false, inDouble = false, inTemplate = 0;
-  for (let i = 0; i < code.length; i++) {
-    const ch = code[i];
-    const prev = i > 0 ? code[i - 1] : "";
-    if (!inSingle && !inDouble && inTemplate === 0 && ch === "`" && prev !== "\\") {
-      inTemplate++;
-      continue;
-    }
-    if (inTemplate > 0) {
-      if (ch === "`" && prev !== "\\") inTemplate--;
-      continue;
-    }
-    if (!inDouble && ch === "'" && prev !== "\\") {
-      inSingle = !inSingle;
-      continue;
-    }
-    if (!inSingle && ch === '"' && prev !== "\\") {
-      inDouble = !inDouble;
-      continue;
-    }
-    if (inSingle || inDouble) continue;
-    if (ch === "{") braces++;
-    else if (ch === "}") braces--;
-    else if (ch === "(") parens++;
-    else if (ch === ")") parens--;
-    else if (ch === "[") brackets++;
-    else if (ch === "]") brackets--;
+function ensureStylesheet(files) {
+  const CSS_PATH = "src/index.css";
+  const TAILWIND_DIRECTIVES = "@tailwind base;\n@tailwind components;\n@tailwind utilities;\n";
+  if (!files[CSS_PATH]) {
+    files[CSS_PATH] = TAILWIND_DIRECTIVES + '\nbody {\n  margin: 0;\n  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;\n}\n';
+    console.log("[Coder] ensureStylesheet: created src/index.css with Tailwind directives");
+  } else if (!files[CSS_PATH].includes("@tailwind")) {
+    files[CSS_PATH] = TAILWIND_DIRECTIVES + "\n" + files[CSS_PATH];
+    console.log("[Coder] ensureStylesheet: prepended Tailwind directives to existing src/index.css");
   }
-  if (braces !== 0) return { valid: false, error: `Unbalanced braces (net: ${braces > 0 ? "+" : ""}${braces})` };
-  if (parens !== 0) return { valid: false, error: `Unbalanced parentheses (net: ${parens > 0 ? "+" : ""}${parens})` };
-  if (brackets !== 0) return { valid: false, error: `Unbalanced brackets (net: ${brackets > 0 ? "+" : ""}${brackets})` };
-  return { valid: true };
+  const mainEntry = Object.keys(files).find((p) => ENTRY_FILE_PATTERN.test(p));
+  if (!mainEntry) return;
+  const mainContent = files[mainEntry];
+  if (/import\s+['\.](.*index|.*\/index)?\.(css|scss|sass)['"]/.test(mainContent)) return;
+  if (mainContent.includes("'./index.css'") || mainContent.includes('"./index.css"')) return;
+  files[mainEntry] = `import './index.css';
+` + mainContent;
+  console.log(`[Coder] ensureStylesheet: injected CSS import into ${mainEntry}`);
 }
-function resolveRelativeImport(fromFile, importPath) {
-  const parts = fromFile.split("/");
-  parts.pop();
-  for (const seg of importPath.split("/")) {
-    if (seg === "..") parts.pop();
-    else if (seg !== ".") parts.push(seg);
+const LAYOUT_NAME_RE = /^src\/components\/(SharedLayout|AppLayout|Layout|Navbar|Navigation|NavBar|Header|AppShell)\.(tsx|jsx)$/i;
+function ensureSharedLayout(files) {
+  const warnings = [];
+  const layoutFile = Object.keys(files).find((p) => LAYOUT_NAME_RE.test(p));
+  if (!layoutFile) return warnings;
+  const layoutName = layoutFile.split("/").pop().replace(/\.(tsx|jsx)$/, "");
+  let layoutContent = files[layoutFile];
+  if (!layoutContent.includes("Outlet")) {
+    if (!layoutContent.includes("from 'react-router-dom'")) {
+      layoutContent = `import { Outlet } from 'react-router-dom';
+` + layoutContent;
+    } else {
+      layoutContent = layoutContent.replace(
+        /import\s*\{([^}]+)\}\s*from\s*['"]react-router-dom['"]/,
+        (m, syms) => `import { ${syms.trim()}, Outlet } from 'react-router-dom'`
+      );
+    }
   }
-  return parts.join("/");
+  if (!layoutContent.includes("children") && !layoutContent.includes("<Outlet")) {
+    layoutContent = layoutContent.replace(
+      /(<main[^>]*>|<div[^>]*>)/,
+      `$1
+      {children ?? <Outlet />}`
+    );
+    files[layoutFile] = layoutContent;
+    const msg = `ensureSharedLayout: made ${layoutName} render {children ?? <Outlet />}`;
+    console.warn(`[Coder] ${msg}`);
+    warnings.push(msg);
+  }
+  for (const [fp, content] of Object.entries(files)) {
+    if (fp === layoutFile) continue;
+    if (!/\/pages\//.test(fp)) continue;
+    if (!content.includes(layoutName)) continue;
+    const wrapRegex = new RegExp(`<${layoutName}[^>]*>([\\s\\S]*?)<\\/${layoutName}>`, "g");
+    if (wrapRegex.test(content)) {
+      files[fp] = content.replace(wrapRegex, "$1");
+      const msg = `ensureSharedLayout: stripped self-wrapping <${layoutName}> from ${fp}`;
+      console.warn(`[Coder] ${msg}`);
+      warnings.push(msg);
+    }
+  }
+  const appFile = Object.keys(files).find((p) => /^src\/App\.(tsx|jsx)$/.test(p));
+  if (appFile) {
+    const appContent = files[appFile];
+    if (!appContent.includes(layoutName) && appContent.includes("<Routes>")) {
+      const importPath = "./" + layoutFile.replace(/^src\//, "").replace(/\.(tsx|jsx)$/, "");
+      let newContent = appContent;
+      if (!newContent.includes(importPath)) {
+        newContent = `import ${layoutName} from '${importPath}';
+` + newContent;
+      }
+      newContent = newContent.replace(
+        /(<Routes>[\s\S]*?<\/Routes>)/,
+        `<${layoutName}>
+      $1
+    </${layoutName}>`
+      );
+      if (newContent !== appContent) {
+        files[appFile] = newContent;
+        const msg = `ensureSharedLayout: wired ${layoutName} around <Routes> in App.tsx`;
+        console.warn(`[Coder] ${msg}`);
+        warnings.push(msg);
+      }
+    }
+  }
+  return warnings;
+}
+function fixBackendRoutesAndServer(files) {
+  const warnings = [];
+  for (const [fp, content] of Object.entries(files)) {
+    if (!/^(server|backend)\/routes\/[^\/]+\.js$/.test(fp)) continue;
+    const moduleName = fp.split("/").pop().replace(/\.js$/, "").toLowerCase();
+    const redundantPrefixRe = new RegExp(`(router\\.(?:get|post|put|delete|patch)\\s*\\(\\s*['"])\\/${moduleName}(\\/|['"])`, "gi");
+    if (redundantPrefixRe.test(content)) {
+      const fixed = content.replace(redundantPrefixRe, "$1$2");
+      files[fp] = fixed;
+      const msg = `fixBackendRoutesAndServer: stripped redundant prefix "/${moduleName}" in ${fp} (routers use bare relative paths)`;
+      console.warn(`[Coder] ${msg}`);
+      warnings.push(msg);
+    }
+  }
+  const serverEntry = Object.keys(files).find((p) => /^(server|backend)\/(index|server)\.js$/.test(p));
+  if (serverEntry) {
+    let serverContent = files[serverEntry];
+    let changed = false;
+    if (serverContent.includes("5000")) {
+      serverContent = serverContent.replace(/\b5000\b/g, "3001");
+      changed = true;
+      const msg = `fixBackendRoutesAndServer: updated server port in ${serverEntry} to 3001 to match vite proxy`;
+      console.warn(`[Coder] ${msg}`);
+      warnings.push(msg);
+    }
+    const usesReqUser = Object.entries(files).some(([p, c]) => isBackendPath(p) && c.includes("req.user"));
+    if (usesReqUser && !serverContent.includes("req.user")) {
+      const authMiddleware = `
+// Injected stub authentication middleware
+app.use((req, res, next) => { req.user = req.user || { id: 1, email: 'demo@example.com' }; next(); });
+`;
+      serverContent = serverContent.replace(/(const app = express\(\);|express\(\);)/, `$1
+${authMiddleware}`);
+      changed = true;
+      const msg = `fixBackendRoutesAndServer: injected stub auth middleware (req.user = { id: 1 }) into ${serverEntry}`;
+      console.warn(`[Coder] ${msg}`);
+      warnings.push(msg);
+    }
+    if (changed) {
+      files[serverEntry] = serverContent;
+    }
+  }
+  return warnings;
+}
+function cleanupDuplicateHtmlFiles(files) {
+  const warnings = [];
+  const htmlFiles = Object.keys(files).filter((p) => p.endsWith(".html"));
+  for (const p of htmlFiles) {
+    if (p !== "index.html") {
+      delete files[p];
+      const msg = `cleanupDuplicateHtmlFiles: removed extra HTML shell at "${p}"`;
+      console.warn(`[Coder] ${msg}`);
+      warnings.push(msg);
+    }
+  }
+  return warnings;
 }
 function createMissingImportStubs(files) {
+  const warnings = [];
   const IMPORT_RE = /^(?:import\s+(?:[\s\S]*?from\s+)?|export\s+\{[^}]*\}\s+from\s+)['"](\.[\/]?[^'"]+)['"]/gm;
   const REQUIRE_RE = /require\s*\(\s*['"](\.[^'"]+)['"]\s*\)/g;
   const TRY_EXTS = ["", ".ts", ".tsx", ".js", ".jsx", "/index.ts", "/index.tsx", "/index.js", "/index.jsx"];
@@ -10020,12 +10532,22 @@ function createMissingImportStubs(files) {
         const exists = TRY_EXTS.some((ext2) => resolved + ext2 in files || resolved + ext2 in stubs);
         if (exists) continue;
         const ext = resolved.includes(".") ? resolved.split(".").pop() : "";
+        const compName = (resolved.split("/").pop() || "Placeholder").replace(/\.(tsx?|jsx?)$/, "");
+        const targetPath = ext === "tsx" || ext === "jsx" || !ext ? resolved.endsWith(".tsx") ? resolved : `${resolved}.tsx` : resolved;
         if (ext === "css" || ext === "scss" || ext === "sass") {
-          stubs[resolved] = "/* auto-generated stub */\n";
-        } else if (["ts", "tsx", "js", "jsx"].includes(ext)) {
-          stubs[resolved] = "export {};\n";
-        } else if (!ext) {
-          stubs[resolved + ".tsx"] = "export {};\n";
+          stubs[targetPath] = "/* auto-generated stub */\n";
+        } else if (ext === "ts" || ext === "js") {
+          stubs[targetPath] = "export {};\n";
+        } else {
+          stubs[targetPath] = `export default function ${compName}() {
+  return (
+    <div className="p-8">
+      <h2 className="text-xl font-semibold">${compName}</h2>
+      <p className="text-sm text-gray-500">This page has not been generated yet.</p>
+    </div>
+  );
+}
+`;
         }
       }
     }
@@ -10033,9 +10555,12 @@ function createMissingImportStubs(files) {
   for (const [stubPath, content] of Object.entries(stubs)) {
     if (!(stubPath in files)) {
       files[stubPath] = content;
-      console.log(`[Coder] ⚠️ Created stub for missing local import: ${stubPath}`);
+      const msg = `createMissingImportStubs: created functional stub component for missing import ${stubPath}`;
+      console.warn(`[Coder] ⚠️ ${msg}`);
+      warnings.push(msg);
     }
   }
+  return warnings;
 }
 class CoderAgent extends AgentBase {
   constructor(env) {
@@ -10052,15 +10577,22 @@ class CoderAgent extends AgentBase {
     }
     const fileList = architecture.fileStructure || [];
     let allGeneratedFiles = {};
+    const plannedPkg = (() => {
+      try {
+        return JSON.parse(buildConfigFileTemplates(requirements, architecture)["package.json"] || "{}");
+      } catch {
+        return {};
+      }
+    })();
+    const versionHints = buildVersionHintsBlock(plannedPkg);
     if (fileList.length > 0) {
-      allGeneratedFiles = await this.generatePerFile(fileList, requirements, architecture, designDecisions);
+      allGeneratedFiles = await this.generatePerFile(fileList, requirements, architecture, designDecisions, versionHints);
     } else {
       console.warn("[Coder] Architecture has no fileStructure — falling back to blob generation");
       allGeneratedFiles = await this.generateAsBlobsFallback(requirements, architecture, designDecisions);
     }
     const configTemplates = buildConfigFileTemplates(requirements, architecture);
     allGeneratedFiles = { ...allGeneratedFiles, ...configTemplates };
-    ensureEntryPoint(allGeneratedFiles, architecture);
     if (Object.keys(allGeneratedFiles).length === 0) {
       throw new Error("Coder generated zero files");
     }
@@ -10071,20 +10603,32 @@ class CoderAgent extends AgentBase {
       ...dataFiles,
       ...integrationFiles
     };
-    reconcileDependencies(allFiles);
-    createMissingImportStubs(allFiles);
+    const consistencyWarnings = [];
+    consistencyWarnings.push(...cleanupDuplicateHtmlFiles(allFiles));
+    consistencyWarnings.push(...stripExtraRouters(allFiles));
+    consistencyWarnings.push(...ensureSharedLayout(allFiles));
+    consistencyWarnings.push(...ensureEntryPoint(allFiles, architecture));
+    consistencyWarnings.push(...fixBackendRoutesAndServer(allFiles));
+    guardReactCompatibility(allFiles);
+    consistencyWarnings.push(...reconcileDependencies(allFiles));
+    ensureStylesheet(allFiles);
+    consistencyWarnings.push(...createMissingImportStubs(allFiles));
     console.log(`[Coder] Total files generated: ${Object.keys(allFiles).length}`);
     Object.keys(allFiles).forEach((f) => console.log(`  → ${f}`));
     const healResult = await runBuildHeal(allFiles, this.callLLM.bind(this));
     const healedFiles = healResult.files;
-    if (healResult.buildWarnings.length > 0) {
-      healResult.buildWarnings.forEach((w) => console.warn(`[BuildHealer] ⚠️ ${w}`));
+    const allBuildWarnings = [
+      ...consistencyWarnings,
+      ...healResult.buildWarnings
+    ];
+    if (allBuildWarnings.length > 0) {
+      allBuildWarnings.forEach((w) => console.warn(`[Coder Quality] ⚠️ ${w}`));
     }
     return {
       success: true,
       agentName: "coder",
       data: healedFiles,
-      ...healResult.buildWarnings.length > 0 ? { warnings: healResult.buildWarnings } : {}
+      ...allBuildWarnings.length > 0 ? { warnings: allBuildWarnings } : {}
     };
   }
   // ── Part 1d: generate one file safely with syntax validation + retry ────────
@@ -10128,7 +10672,7 @@ export default function ${name}() {
 }
 `;
   }
-  async generatePerFile(fileList, requirements, architecture, designDecisions) {
+  async generatePerFile(fileList, requirements, architecture, designDecisions, versionHints) {
     const files = {};
     const failed = [];
     const frontendFiles = fileList.filter((f) => !isBackendPath(f.path) && !isConfigFile(f.path));
@@ -10141,7 +10685,7 @@ export default function ${name}() {
       console.log(`[Coder] → ${file.path}`);
       const code = await this.generateSingleFileSafe(
         FRONTEND_FILE_SYSTEM_PROMPT,
-        () => FRONTEND_FILE_USER_PROMPT(requirements, architecture, designDecisions, file.path, file.purpose),
+        () => FRONTEND_FILE_USER_PROMPT(requirements, architecture, designDecisions, file.path, file.purpose, versionHints),
         file.path
       );
       if (code !== null) {
@@ -10155,7 +10699,7 @@ export default function ${name}() {
       console.log(`[Coder] → ${file.path}`);
       const code = await this.generateSingleFileSafe(
         BACKEND_FILE_SYSTEM_PROMPT,
-        () => BACKEND_FILE_USER_PROMPT(architecture, file.path, file.purpose),
+        () => BACKEND_FILE_USER_PROMPT(architecture, file.path, file.purpose, versionHints),
         file.path
       );
       if (code !== null) {
@@ -10677,7 +11221,7 @@ class Orchestrator extends AgentBase {
           const cls = this.parseJson(classJson);
           console.log(`[Orchestrator] Classification: ${cls.classification} — ${cls.reasoning}`);
           if (cls.classification === "related-edit") {
-            const { EditorAgent } = await import('./editor.agent-Epdga1F5.js');
+            const { EditorAgent } = await import('./editor.agent-OI6yVK1s.js');
             const editor = new EditorAgent(this.env);
             const editResult = await editor.run({
               userRequest,
@@ -10847,20 +11391,6 @@ class Orchestrator extends AgentBase {
   }
 }
 
-async function getEffectiveUserIdForAgent(request, env) {
-  try {
-    const { getUser } = await Promise.resolve().then(() => session_server);
-    const user = await getUser(request, env);
-    if (user?.userId) return String(user.userId);
-  } catch {
-  }
-  const cookieHeader = request.headers.get("Cookie");
-  if (cookieHeader) {
-    const match = cookieHeader.match(/__bolt_guest_id=([^;]+)/);
-    if (match) return decodeURIComponent(match[1]);
-  }
-  return `guest_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-}
 async function action$1({ request, context }) {
   const { query } = await Promise.resolve().then(() => db_server);
   const body = await request.json();
@@ -10896,6 +11426,33 @@ async function action$1({ request, context }) {
   } catch (e) {
     console.warn("[Agent API] Could not load existing project (non-fatal):", e?.message);
   }
+  const cookieHeader = request.headers.get("Cookie");
+  let userId;
+  let newGuestId = void 0;
+  try {
+    const { getUser } = await Promise.resolve().then(() => session_server);
+    const user = await getUser(request, env);
+    if (user?.userId) {
+      userId = String(user.userId);
+    } else {
+      throw new Error("no session");
+    }
+  } catch {
+    const match = cookieHeader?.match(/__bolt_guest_id=([^;]+)/);
+    if (match) {
+      userId = decodeURIComponent(match[1]);
+    } else {
+      userId = `guest_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+      newGuestId = userId;
+    }
+  }
+  function withAgentCookie(responseInit) {
+    if (!newGuestId) return responseInit || {};
+    const cookieValue = `__bolt_guest_id=${encodeURIComponent(newGuestId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`;
+    const headers = new Headers(responseInit?.headers);
+    headers.append("Set-Cookie", cookieValue);
+    return { ...responseInit, headers };
+  }
   try {
     console.log("ENV CHECK:", JSON.stringify(env));
     const orchestrator = new Orchestrator(env);
@@ -10905,9 +11462,9 @@ async function action$1({ request, context }) {
       async (event) => {
         try {
           await query(
-            `INSERT INTO agent_tasks 
-          (run_id, agent_name, status, input, output, started_at, completed_at)
-          VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`,
+            `INSERT INTO agent_tasks
+             (run_id, agent_name, status, input, output, started_at, completed_at)
+             VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`,
             [
               event.runId,
               event.agentName,
@@ -10928,15 +11485,14 @@ async function action$1({ request, context }) {
       return json({
         needsConfirmation: true,
         confirmationMessage: result.confirmationMessage
-      });
+      }, withAgentCookie({}));
     }
     const filesToSave = result.files && Object.keys(result.files).length > 0 ? result.files : null;
     if (filesToSave) {
       try {
-        const { saveProjectForUser } = await Promise.resolve().then(() => db_server);
-        const userId = await getEffectiveUserIdForAgent(request, env);
+        const { saveProjectFilesOnly } = await Promise.resolve().then(() => db_server);
         const title = userRequest.length > 60 ? userRequest.slice(0, 60) + "..." : userRequest;
-        await saveProjectForUser(chatId, title, [], filesToSave, userId, env);
+        await saveProjectFilesOnly(chatId, title, filesToSave, userId, env);
         console.log(`[Agent API] ✅ Files saved to DB server-side: ${Object.keys(filesToSave).length} files for chat_id=${chatId}`);
       } catch (saveErr) {
         console.error("[Agent API] ⚠️ Server-side DB save failed (non-fatal):", saveErr?.message);
@@ -10950,20 +11506,20 @@ async function action$1({ request, context }) {
         fileCount: Object.keys(result.files || {}).length,
         runId: result.runId,
         warnings: result.warnings
-      }, { status: 500 });
+      }, withAgentCookie({ status: 500 }));
     }
     return json({
       success: true,
       files: result.files,
       runId: result.runId,
       fileCount: Object.keys(result.files || {}).length
-    });
+    }, withAgentCookie({}));
   } catch (error) {
     console.error("Agent API error:", error);
     return json({
       success: false,
       error: error.message
-    }, { status: 500 });
+    }, withAgentCookie({ status: 500 }));
   }
 }
 async function loader$4({ request, context }) {
@@ -10981,9 +11537,9 @@ async function loader$4({ request, context }) {
       env
     );
     const tasksResult = await query(
-      `SELECT agent_name, status, output, started_at, completed_at 
-       FROM agent_tasks 
-       WHERE run_id = $1 
+      `SELECT agent_name, status, output, started_at, completed_at
+       FROM agent_tasks
+       WHERE run_id = $1
        ORDER BY started_at ASC`,
       [runId],
       env
@@ -13601,7 +14157,7 @@ async function newShellProcess(webcontainer, terminal) {
         }
         terminal.write(data);
         try {
-          import('./debugLogger-BbEpjNye.js').then(({ captureTerminalLog }) => {
+          import('./debugLogger-BV6iNleL.js').then(({ captureTerminalLog }) => {
             const cleanData = data.replace(/\x1b\[[0-9;]*[mG]/g, "").trim();
             if (cleanData) {
               captureTerminalLog(cleanData, "output");
@@ -13617,7 +14173,7 @@ async function newShellProcess(webcontainer, terminal) {
     if (isInteractive) {
       input.write(data);
       try {
-        import('./debugLogger-BbEpjNye.js').then(({ captureTerminalLog }) => {
+        import('./debugLogger-BV6iNleL.js').then(({ captureTerminalLog }) => {
           const cleanData = data.replace(/\x1b\[[0-9;]*[A-Z]/g, "").trim();
           if (cleanData && cleanData !== "\r" && cleanData !== "\n") {
             captureTerminalLog(cleanData, "input");
@@ -15284,7 +15840,7 @@ ${content || description}
                     ),
                     children: [
                       /* @__PURE__ */ jsx("div", { className: "i-ph:chat-circle-duotone" }),
-                      "Ask Bolt"
+                      "Ask DigitalSofts AI"
                     ]
                   }
                 ),
@@ -15315,7 +15871,7 @@ function ChatAlert({ alert, clearAlert, postMessage }) {
   const { description, content, source } = alert;
   const isPreview = source === "preview";
   const title = isPreview ? "Preview Error" : "Terminal Error";
-  const message = isPreview ? "We encountered an error while running the preview. Would you like Bolt to analyze and help resolve this issue?" : "We encountered an error while running terminal commands. Would you like Bolt to analyze and help resolve this issue?";
+  const message = isPreview ? "We encountered an error while running the preview. Would you like DigitalSofts AI to analyze and help resolve this issue?" : "We encountered an error while running terminal commands. Would you like DigitalSofts AI to analyze and help resolve this issue?";
   return /* @__PURE__ */ jsx(AnimatePresence, { children: /* @__PURE__ */ jsx(
     motion.div,
     {
@@ -15390,7 +15946,7 @@ ${content}
                     ),
                     children: [
                       /* @__PURE__ */ jsx("div", { className: "i-ph:chat-circle-duotone" }),
-                      "Ask Bolt"
+                      "Ask DigitalSofts AI"
                     ]
                   }
                 ),
@@ -16283,7 +16839,7 @@ const BaseChat = React__default.forwardRef(
                 /* @__PURE__ */ jsx("div", { className: "flex flex-col gap-5" })
               ] })
             ] }),
-            /* @__PURE__ */ jsx(ClientOnly, { children: () => /* @__PURE__ */ jsx(Workbench, { chatStarted: chatStarted || showWorkbench, isStreaming, setSelectedElement }) })
+            /* @__PURE__ */ jsx(ClientOnly, { children: () => /* @__PURE__ */ jsx(Workbench, { chatStarted: chatStarted || showWorkbench, isStreaming, setSelectedElement, messages }) })
           ] })
         ]
       }
@@ -16684,7 +17240,7 @@ const route42 = /*#__PURE__*/Object.freeze(/*#__PURE__*/Object.defineProperty({
   meta
 }, Symbol.toStringTag, { value: 'Module' }));
 
-const serverManifest = {'entry':{'module':'/assets/entry.client-Cy4_-gvi.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes':{'root':{'id':'root','parentId':undefined,'path':'','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/root-tp05465X.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-CQctLlj5.js'],'css':['/assets/root-RetOWtl8.css']},'routes/api.configured-providers':{'id':'routes/api.configured-providers','parentId':'root','path':'api/configured-providers','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.configured-providers-l0sNRNKZ.js','imports':[],'css':[]},'routes/webcontainer.connect.$id':{'id':'routes/webcontainer.connect.$id','parentId':'root','path':'webcontainer/connect/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/webcontainer.connect._id-l0sNRNKZ.js','imports':[],'css':[]},'routes/webcontainer.preview.$id':{'id':'routes/webcontainer.preview.$id','parentId':'root','path':'webcontainer/preview/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/webcontainer.preview._id-Brb4CmdH.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.system.diagnostics':{'id':'routes/api.system.diagnostics','parentId':'root','path':'api/system/diagnostics','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.diagnostics-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.mcp-update-config':{'id':'routes/api.mcp-update-config','parentId':'root','path':'api/mcp-update-config','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.mcp-update-config-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.models.$provider':{'id':'routes/api.models.$provider','parentId':'routes/api.models','path':':provider','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.models._provider-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.system.disk-info':{'id':'routes/api.system.disk-info','parentId':'root','path':'api/system/disk-info','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.disk-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.export-api-keys':{'id':'routes/api.export-api-keys','parentId':'root','path':'api/export-api-keys','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.export-api-keys-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-branches':{'id':'routes/api.github-branches','parentId':'root','path':'api/github-branches','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-branches-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-template':{'id':'routes/api.github-template','parentId':'root','path':'api/github-template','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-template-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.gitlab-branches':{'id':'routes/api.gitlab-branches','parentId':'root','path':'api/gitlab-branches','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.gitlab-branches-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.gitlab-projects':{'id':'routes/api.gitlab-projects','parentId':'root','path':'api/gitlab-projects','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.gitlab-projects-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.system.git-info':{'id':'routes/api.system.git-info','parentId':'root','path':'api/system/git-info','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.git-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.netlify-deploy':{'id':'routes/api.netlify-deploy','parentId':'root','path':'api/netlify-deploy','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.netlify-deploy-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.check-env-key':{'id':'routes/api.check-env-key','parentId':'root','path':'api/check-env-key','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.check-env-key-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.vercel-deploy':{'id':'routes/api.vercel-deploy','parentId':'root','path':'api/vercel-deploy','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.vercel-deploy-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.agent.status':{'id':'routes/api.agent.status','parentId':'routes/api.agent','path':'status','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.agent.status-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-stats':{'id':'routes/api.github-stats','parentId':'root','path':'api/github-stats','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-stats-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.netlify-user':{'id':'routes/api.netlify-user','parentId':'root','path':'api/netlify-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.netlify-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.git-proxy.$':{'id':'routes/api.git-proxy.$','parentId':'root','path':'api/git-proxy/*','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.git-proxy._-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-user':{'id':'routes/api.github-user','parentId':'root','path':'api/github-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.vercel-user':{'id':'routes/api.vercel-user','parentId':'root','path':'api/vercel-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.vercel-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.bug-report':{'id':'routes/api.bug-report','parentId':'root','path':'api/bug-report','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.bug-report-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.web-search':{'id':'routes/api.web-search','parentId':'root','path':'api/web-search','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.web-search-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.mcp-check':{'id':'routes/api.mcp-check','parentId':'root','path':'api/mcp-check','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.mcp-check-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.enhancer':{'id':'routes/api.enhancer','parentId':'root','path':'api/enhancer','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.enhancer-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.git-info':{'id':'routes/api.git-info','parentId':'root','path':'api/git-info','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.git-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.projects':{'id':'routes/api.projects','parentId':'root','path':'api/projects','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.projects-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.llmcall':{'id':'routes/api.llmcall','parentId':'root','path':'api/llmcall','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.llmcall-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.logout':{'id':'routes/auth.logout','parentId':'root','path':'auth/logout','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.logout-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.signup':{'id':'routes/auth.signup','parentId':'root','path':'auth/signup','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.signup-jo4f5nVm.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.health':{'id':'routes/api.health','parentId':'root','path':'api/health','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.health-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.models':{'id':'routes/api.models','parentId':'root','path':'api/models','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.models-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.social':{'id':'routes/api.social','parentId':'root','path':'api/social','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.social-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.update':{'id':'routes/api.update','parentId':'root','path':'api/update','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.update-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.login':{'id':'routes/auth.login','parentId':'root','path':'auth/login','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.login-BoH3eejp.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.agent':{'id':'routes/api.agent','parentId':'root','path':'api/agent','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.agent-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.chat':{'id':'routes/api.chat','parentId':'root','path':'api/chat','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.chat-l0sNRNKZ.js','imports':[],'css':[]},'routes/chat.$id':{'id':'routes/chat.$id','parentId':'root','path':'chat/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/chat._id-LxIwU0Vx.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-CQctLlj5.js','/assets/index-B9wrbsKF.js','/assets/mobile-iCfoPXXk.js'],'css':['/assets/index-BJyyulAC.css']},'routes/_index':{'id':'routes/_index','parentId':'root','path':undefined,'index':true,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/_index-DLhwur7j.js','imports':['/assets/chat._id-LxIwU0Vx.js','/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-CQctLlj5.js','/assets/index-B9wrbsKF.js','/assets/mobile-iCfoPXXk.js'],'css':['/assets/index-BJyyulAC.css']},'routes/guest':{'id':'routes/guest','parentId':'root','path':'guest','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/guest-C7Q0pKxO.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-CQctLlj5.js','/assets/index-B9wrbsKF.js','/assets/mobile-iCfoPXXk.js'],'css':['/assets/index-BJyyulAC.css']},'routes/git':{'id':'routes/git','parentId':'root','path':'git','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/git-CPMtai21.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-CQctLlj5.js','/assets/index-B9wrbsKF.js','/assets/mobile-iCfoPXXk.js'],'css':['/assets/index-BJyyulAC.css']}},'url':'/assets/manifest-1adaeb70.js','version':'1adaeb70'};
+const serverManifest = {'entry':{'module':'/assets/entry.client-Cy4_-gvi.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes':{'root':{'id':'root','parentId':undefined,'path':'','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/root-ueaFZvpu.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-BGYY-_q9.js'],'css':['/assets/root-RetOWtl8.css']},'routes/api.configured-providers':{'id':'routes/api.configured-providers','parentId':'root','path':'api/configured-providers','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.configured-providers-l0sNRNKZ.js','imports':[],'css':[]},'routes/webcontainer.connect.$id':{'id':'routes/webcontainer.connect.$id','parentId':'root','path':'webcontainer/connect/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/webcontainer.connect._id-l0sNRNKZ.js','imports':[],'css':[]},'routes/webcontainer.preview.$id':{'id':'routes/webcontainer.preview.$id','parentId':'root','path':'webcontainer/preview/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/webcontainer.preview._id-Brb4CmdH.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.system.diagnostics':{'id':'routes/api.system.diagnostics','parentId':'root','path':'api/system/diagnostics','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.diagnostics-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.mcp-update-config':{'id':'routes/api.mcp-update-config','parentId':'root','path':'api/mcp-update-config','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.mcp-update-config-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.models.$provider':{'id':'routes/api.models.$provider','parentId':'routes/api.models','path':':provider','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.models._provider-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.system.disk-info':{'id':'routes/api.system.disk-info','parentId':'root','path':'api/system/disk-info','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.disk-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.export-api-keys':{'id':'routes/api.export-api-keys','parentId':'root','path':'api/export-api-keys','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.export-api-keys-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-branches':{'id':'routes/api.github-branches','parentId':'root','path':'api/github-branches','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-branches-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-template':{'id':'routes/api.github-template','parentId':'root','path':'api/github-template','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-template-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.gitlab-branches':{'id':'routes/api.gitlab-branches','parentId':'root','path':'api/gitlab-branches','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.gitlab-branches-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.gitlab-projects':{'id':'routes/api.gitlab-projects','parentId':'root','path':'api/gitlab-projects','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.gitlab-projects-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.system.git-info':{'id':'routes/api.system.git-info','parentId':'root','path':'api/system/git-info','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.system.git-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.netlify-deploy':{'id':'routes/api.netlify-deploy','parentId':'root','path':'api/netlify-deploy','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.netlify-deploy-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.check-env-key':{'id':'routes/api.check-env-key','parentId':'root','path':'api/check-env-key','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.check-env-key-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.vercel-deploy':{'id':'routes/api.vercel-deploy','parentId':'root','path':'api/vercel-deploy','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.vercel-deploy-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.agent.status':{'id':'routes/api.agent.status','parentId':'routes/api.agent','path':'status','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.agent.status-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-stats':{'id':'routes/api.github-stats','parentId':'root','path':'api/github-stats','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-stats-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.netlify-user':{'id':'routes/api.netlify-user','parentId':'root','path':'api/netlify-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.netlify-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.git-proxy.$':{'id':'routes/api.git-proxy.$','parentId':'root','path':'api/git-proxy/*','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.git-proxy._-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.github-user':{'id':'routes/api.github-user','parentId':'root','path':'api/github-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.github-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.vercel-user':{'id':'routes/api.vercel-user','parentId':'root','path':'api/vercel-user','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.vercel-user-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.bug-report':{'id':'routes/api.bug-report','parentId':'root','path':'api/bug-report','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.bug-report-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.web-search':{'id':'routes/api.web-search','parentId':'root','path':'api/web-search','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.web-search-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.mcp-check':{'id':'routes/api.mcp-check','parentId':'root','path':'api/mcp-check','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.mcp-check-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.enhancer':{'id':'routes/api.enhancer','parentId':'root','path':'api/enhancer','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.enhancer-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.git-info':{'id':'routes/api.git-info','parentId':'root','path':'api/git-info','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.git-info-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.projects':{'id':'routes/api.projects','parentId':'root','path':'api/projects','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.projects-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.llmcall':{'id':'routes/api.llmcall','parentId':'root','path':'api/llmcall','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.llmcall-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.logout':{'id':'routes/auth.logout','parentId':'root','path':'auth/logout','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.logout-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.signup':{'id':'routes/auth.signup','parentId':'root','path':'auth/signup','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.signup-jo4f5nVm.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.health':{'id':'routes/api.health','parentId':'root','path':'api/health','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.health-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.models':{'id':'routes/api.models','parentId':'root','path':'api/models','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.models-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.social':{'id':'routes/api.social','parentId':'root','path':'api/social','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.social-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.update':{'id':'routes/api.update','parentId':'root','path':'api/update','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.update-l0sNRNKZ.js','imports':[],'css':[]},'routes/auth.login':{'id':'routes/auth.login','parentId':'root','path':'auth/login','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/auth.login-BoH3eejp.js','imports':['/assets/components-Bjj1g-EF.js'],'css':[]},'routes/api.agent':{'id':'routes/api.agent','parentId':'root','path':'api/agent','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.agent-l0sNRNKZ.js','imports':[],'css':[]},'routes/api.chat':{'id':'routes/api.chat','parentId':'root','path':'api/chat','index':undefined,'caseSensitive':undefined,'hasAction':true,'hasLoader':false,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/api.chat-l0sNRNKZ.js','imports':[],'css':[]},'routes/chat.$id':{'id':'routes/chat.$id','parentId':'root','path':'chat/:id','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/chat._id-7ZtLszJG.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-BGYY-_q9.js','/assets/index-BcHTCebS.js','/assets/mobile-Cp3-Wvf8.js'],'css':['/assets/index-BJyyulAC.css']},'routes/_index':{'id':'routes/_index','parentId':'root','path':undefined,'index':true,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/_index-C5s9rAfL.js','imports':['/assets/chat._id-7ZtLszJG.js','/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-BGYY-_q9.js','/assets/index-BcHTCebS.js','/assets/mobile-Cp3-Wvf8.js'],'css':['/assets/index-BJyyulAC.css']},'routes/guest':{'id':'routes/guest','parentId':'root','path':'guest','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/guest-DiF5afif.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-BGYY-_q9.js','/assets/index-BcHTCebS.js','/assets/mobile-Cp3-Wvf8.js'],'css':['/assets/index-BJyyulAC.css']},'routes/git':{'id':'routes/git','parentId':'root','path':'git','index':undefined,'caseSensitive':undefined,'hasAction':false,'hasLoader':true,'hasClientAction':false,'hasClientLoader':false,'hasErrorBoundary':false,'module':'/assets/git-xNzqZCzR.js','imports':['/assets/components-Bjj1g-EF.js','/assets/react-toastify.esm-BGYY-_q9.js','/assets/index-BcHTCebS.js','/assets/mobile-Cp3-Wvf8.js'],'css':['/assets/index-BJyyulAC.css']}},'url':'/assets/manifest-50c6efb3.js','version':'50c6efb3'};
 
 /**
        * `mode` is only relevant for the old Remix compiler but

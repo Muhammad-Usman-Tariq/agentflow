@@ -27,6 +27,35 @@ const NPM_INSTALL_TIMEOUT_MS = 120_000; // 2 min
 const NPM_BUILD_TIMEOUT_MS = 90_000;    // 1.5 min
 const LLM_FIX_TIMEOUT_MS = 60_000;
 
+const VALID_PKG_RE = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i;
+function isValidPackageName(name: string): boolean {
+  return (
+    VALID_PKG_RE.test(name) &&
+    name.length <= 214 &&
+    !/\s/.test(name) &&
+    !name.includes('..')
+  );
+}
+
+function sanitizePackageJsonDeps(pkgJsonContent: string): { content: string; stripped: string[] } {
+  const stripped: string[] = [];
+  try {
+    const pkg = JSON.parse(pkgJsonContent);
+    for (const section of ['dependencies', 'devDependencies']) {
+      if (!pkg[section]) continue;
+      for (const key of Object.keys(pkg[section])) {
+        if (!isValidPackageName(key)) {
+          delete pkg[section][key];
+          stripped.push(key);
+        }
+      }
+    }
+    return { content: JSON.stringify(pkg, null, 2), stripped };
+  } catch {
+    return { content: pkgJsonContent, stripped: [] };
+  }
+}
+
 export async function runBuildHeal(
   files: Record<string, string>,
   callLLM: CallLLMFn,
@@ -52,8 +81,30 @@ export async function runBuildHeal(
   const tmpBase: string = pathMod.join(osMod.tmpdir(), `agentflow-build-${Date.now()}`);
 
   let currentFiles = { ...files };
+  let lastFilesHash = '';
 
   for (let round = 1; round <= MAX_HEAL_ROUNDS; round++) {
+    const currentFilesHash = JSON.stringify(currentFiles);
+    if (round > 1 && currentFilesHash === lastFilesHash) {
+      console.warn(`[BuildHealer] Aborting heal loop at round ${round} — files were unchanged from previous round`);
+      warnings.push(`BuildHealer: Aborted retry loop at round ${round} because input files were unchanged.`);
+      break;
+    }
+    lastFilesHash = currentFilesHash;
+
+    // Sanitize package.json if present
+    if (currentFiles['package.json']) {
+      const { content, stripped } = sanitizePackageJsonDeps(currentFiles['package.json']);
+      if (stripped.length > 0) {
+        currentFiles['package.json'] = content;
+        for (const badPkg of stripped) {
+          const msg = `BuildHealer: stripped invalid package "${badPkg}" from package.json`;
+          console.warn(`[BuildHealer] ${msg}`);
+          warnings.push(msg);
+        }
+      }
+    }
+
     console.log(
       `[BuildHealer] Round ${round}/${MAX_HEAL_ROUNDS} — writing ${Object.keys(currentFiles).length} files to temp dir`,
     );
@@ -81,10 +132,37 @@ export async function runBuildHeal(
       NPM_INSTALL_TIMEOUT_MS,
     );
     if (!installResult.success) {
-      const snippet = (installResult.stderr + installResult.stdout).slice(0, 500);
+      const output = installResult.stderr + installResult.stdout;
+      const snippet = output.slice(0, 500);
       console.warn(`[BuildHealer] npm install failed (round ${round}): ${snippet}`);
+
+      let strippedAny = false;
+      if (currentFiles['package.json']) {
+        const notFoundMatch =
+          output.match(/npm ERR! 404\s+['"]?([^'":\n]+)['"]?/i) ||
+          output.match(/No matching version found for ([^@\n\s]+)/i);
+        if (notFoundMatch && notFoundMatch[1]) {
+          const badPkg = notFoundMatch[1].trim();
+          try {
+            const pkg = JSON.parse(currentFiles['package.json']);
+            if (pkg.dependencies?.[badPkg] || pkg.devDependencies?.[badPkg]) {
+              delete pkg.dependencies?.[badPkg];
+              delete pkg.devDependencies?.[badPkg];
+              currentFiles['package.json'] = JSON.stringify(pkg, null, 2);
+              strippedAny = true;
+              const msg = `BuildHealer: stripped failing package "${badPkg}" from package.json`;
+              console.warn(`[BuildHealer] ${msg}`);
+              warnings.push(msg);
+            }
+          } catch {}
+        }
+      }
+
       if (round === MAX_HEAL_ROUNDS) {
         warnings.push(`BuildHealer: npm install still failing after ${MAX_HEAL_ROUNDS} rounds.\n${snippet}`);
+      }
+      if (!strippedAny) {
+        break;
       }
       continue;
     }

@@ -2,24 +2,6 @@ import { json, type ActionFunctionArgs } from '@remix-run/cloudflare';
 import { Orchestrator } from '~/lib/agents/core/orchestrator';
 import { mergeServerEnv } from '~/lib/.server/llm/utils';
 
-// Mirrors the userId-resolution logic in api.projects.ts so the agent route
-// can persist files server-side without a client round-trip.
-async function getEffectiveUserIdForAgent(request: Request, env: any): Promise<string> {
-  try {
-    const { getUser } = await import('~/lib/auth/session.server');
-    const user = await getUser(request, env);
-    if (user?.userId) return String(user.userId);
-  } catch {}
-
-  const cookieHeader = request.headers.get('Cookie');
-  if (cookieHeader) {
-    const match = cookieHeader.match(/__bolt_guest_id=([^;]+)/);
-    if (match) return decodeURIComponent(match[1]);
-  }
-
-  return `guest_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-}
-
 export async function action({ request, context }: ActionFunctionArgs) {
   const { query } = await import('~/lib/db.server');
   const body = await request.json() as any;
@@ -62,6 +44,44 @@ export async function action({ request, context }: ActionFunctionArgs) {
   }
   // ────────────────────────────────────────────────────────────────────────
 
+  // Bug 2 fix: resolve identity exactly once and capture whether we minted a new
+  // guest id so we can set the cookie on every response path (not just GET routes).
+  // Before this fix the agent route called getUser but never set Set-Cookie, so each
+  // agent request minted a new random id — the project ended up owned by a one-time
+  // ghost identity and loadFromDatabase returned null on reload.
+  const cookieHeader = request.headers.get('Cookie');
+  let userId: string;
+  let newGuestId: string | undefined = undefined;
+
+  try {
+    const { getUser } = await import('~/lib/auth/session.server');
+    const user = await getUser(request, env);
+    if (user?.userId) {
+      userId = String(user.userId);
+    } else {
+      throw new Error('no session');
+    }
+  } catch {
+    const match = cookieHeader?.match(/__bolt_guest_id=([^;]+)/);
+    if (match) {
+      userId = decodeURIComponent(match[1]);
+    } else {
+      // No existing guest cookie — mint a new stable id and set it on the response.
+      userId = `guest_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+      newGuestId = userId;
+    }
+  }
+
+  // Attach Set-Cookie when we just minted a new guest id.
+  // Cookie attributes match api.projects.ts exactly so the same cookie is read by both routes.
+  function withAgentCookie(responseInit: ResponseInit | undefined): ResponseInit {
+    if (!newGuestId) return responseInit || {};
+    const cookieValue = `__bolt_guest_id=${encodeURIComponent(newGuestId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`;
+    const headers = new Headers((responseInit as any)?.headers);
+    headers.append('Set-Cookie', cookieValue);
+    return { ...responseInit, headers };
+  }
+
   try {
     console.log('ENV CHECK:', JSON.stringify(env));
     const orchestrator = new Orchestrator(env);
@@ -72,17 +92,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
       async (event) => {
         try {
           await query(
-              `INSERT INTO agent_tasks 
-          (run_id, agent_name, status, input, output, started_at, completed_at)
-          VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`,
-         [
-          event.runId,
-          event.agentName,
-          event.status,
-          JSON.stringify({ message: event.message }),
-          event.data ? JSON.stringify(event.data) : null,
-          ],
-         env
+            `INSERT INTO agent_tasks
+             (run_id, agent_name, status, input, output, started_at, completed_at)
+             VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`,
+            [
+              event.runId,
+              event.agentName,
+              event.status,
+              JSON.stringify({ message: event.message }),
+              event.data ? JSON.stringify(event.data) : null,
+            ],
+            env,
           );
         } catch (e) {
           console.error('Failed to save progress:', e);
@@ -94,35 +114,31 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     // ── Part 4: return confirmation request before doing any generation ───────
     if ((result as any).needsConfirmation) {
+      // Bug 2: attach cookie even on the early needsConfirmation return path.
       return json({
         needsConfirmation: true,
         confirmationMessage: (result as any).confirmationMessage,
-      });
+      }, withAgentCookie({}));
     }
     // ────────────────────────────────────────────────────────────────────────
 
-    // ── Bug 1 fix: persist files server-side before HTTP response ─────────────
-    // The client-side storeMessageHistory() can be lost if the tab suspends
-    // between the orchestrator finishing and the client-side fetch completing.
-    // Saving here (server-side, before the response is sent) ensures files are
-    // always in the DB regardless of client-side network state.
+    // Bug 1 fix: use saveProjectFilesOnly (not saveProjectForUser) so the agent's
+    // server-side save only writes the files column. The ON CONFLICT clause in
+    // saveProjectFilesOnly preserves messages / title / user_id for existing rows.
+    // Before this fix the agent passed messages=[] to saveProjectForUser and
+    // overwrote the real chat history on every generation run.
     const filesToSave = result.files && Object.keys(result.files).length > 0 ? result.files : null;
     if (filesToSave) {
       try {
-        const { saveProjectForUser } = await import('~/lib/db.server');
-        const userId = await getEffectiveUserIdForAgent(request, env);
+        const { saveProjectFilesOnly } = await import('~/lib/db.server');
         const title = userRequest.length > 60 ? userRequest.slice(0, 60) + '...' : userRequest;
-        // Messages are intentionally left empty here — the client-side
-        // storeMessageHistory() call owns message persistence. We only
-        // own the files column in this server-side save.
-        await saveProjectForUser(chatId, title, [], filesToSave, userId, env);
+        await saveProjectFilesOnly(chatId, title, filesToSave, userId, env);
         console.log(`[Agent API] ✅ Files saved to DB server-side: ${Object.keys(filesToSave).length} files for chat_id=${chatId}`);
       } catch (saveErr: any) {
-        // Non-fatal: log and continue. The client-side save is still a fallback.
+        // Non-fatal: the client-side storeMessageHistory() call is the fallback.
         console.error('[Agent API] ⚠️ Server-side DB save failed (non-fatal):', saveErr?.message);
       }
     }
-    // ──────────────────────────────────────────────────────────────────────────
 
     if (!result.success) {
       return json({
@@ -132,7 +148,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
         fileCount: Object.keys(result.files || {}).length,
         runId: result.runId,
         warnings: (result as any).warnings,
-      }, { status: 500 });
+      }, withAgentCookie({ status: 500 }));
     }
 
     return json({
@@ -140,14 +156,14 @@ export async function action({ request, context }: ActionFunctionArgs) {
       files: result.files,
       runId: result.runId,
       fileCount: Object.keys(result.files || {}).length,
-    });
+    }, withAgentCookie({}));
 
   } catch (error: any) {
     console.error('Agent API error:', error);
     return json({
       success: false,
       error: error.message,
-    }, { status: 500 });
+    }, withAgentCookie({ status: 500 }));
   }
 }
 
@@ -167,16 +183,16 @@ export async function loader({ request, context }: any) {
     const runResult = await query(
       'SELECT * FROM agent_runs WHERE id = $1',
       [runId],
-      env
+      env,
     );
 
     const tasksResult = await query(
-      `SELECT agent_name, status, output, started_at, completed_at 
-       FROM agent_tasks 
-       WHERE run_id = $1 
+      `SELECT agent_name, status, output, started_at, completed_at
+       FROM agent_tasks
+       WHERE run_id = $1
        ORDER BY started_at ASC`,
-        [runId],
-        env
+      [runId],
+      env,
     );
 
     return json({
