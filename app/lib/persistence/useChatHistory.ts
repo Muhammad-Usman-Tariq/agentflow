@@ -54,47 +54,20 @@ function extractFilesFromMessages(messages: Message[]): Record<string, { type: '
   for (const message of messages) {
     if (message.role !== 'assistant') continue;
     const content = typeof message.content === 'string' ? message.content : '';
+    if (!content.includes('<boltAction')) continue;
 
-    // ── Path 1: existing <boltAction type="file"> XML format ─────────────────
-    if (content.includes('<boltAction')) {
-      const actionMatches = content.matchAll(
-        /<boltAction[^>]*type="file"(?:[^>]*filePath="([^"]*)")?[^>]*>([\s\S]*?)<\/boltAction>/g
-      );
-      for (const match of actionMatches) {
-        const [, filePath, fileContent] = match;
-        if (filePath) {
-          const storePath = filePath.replace('/home/project/', '').replace(/^\/+/, '');
-          fileMap[storePath] = {
-            type: 'file',
-            content: fileContent.trim(),
-            isBinary: false,
-          };
-        }
-      }
-    }
-
-    // ── Path 2: /api/agent JSON format ────────────────────────────────────────
-    // The server-side agent route returns `{ files: Record<string,string> }`.
-    // When this JSON blob is embedded in an assistant message (e.g. as part of
-    // the run result stored in history), parse it as a second recovery path.
-    if (content.includes('"files"') && content.includes('"fileCount"')) {
-      try {
-        // Extract the first JSON object from the content
-        const jsonMatch = content.match(/\{[\s\S]*"files"\s*:\s*\{[\s\S]*?\}[\s\S]*\}/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          if (parsed.files && typeof parsed.files === 'object') {
-            for (const [rawPath, rawContent] of Object.entries(parsed.files)) {
-              const storePath = String(rawPath).replace(/^\/+/, '');
-              const fileContent = typeof rawContent === 'string' ? rawContent : String(rawContent ?? '');
-              if (storePath && fileContent) {
-                fileMap[storePath] = { type: 'file', content: fileContent, isBinary: false };
-              }
-            }
-          }
-        }
-      } catch {
-        // JSON parse failed — not an agent JSON message, skip silently
+    const actionMatches = content.matchAll(
+      /<boltAction[^>]*type="file"(?:[^>]*filePath="([^"]*)")?[^>]*>([\s\S]*?)<\/boltAction>/g
+    );
+    for (const match of actionMatches) {
+      const [, filePath, fileContent] = match;
+      if (filePath) {
+        const storePath = filePath.replace('/home/project/', '').replace(/^\/+/, '');
+        fileMap[storePath] = {
+          type: 'file',
+          content: fileContent.trim(),
+          isBinary: false,
+        };
       }
     }
   }
@@ -226,6 +199,32 @@ export function useChatHistory() {
         filesToRestore = extractFilesFromMessages(messages);
       }
 
+      // ⚠️ FIX: a saved file-map sometimes ends up with a stray entry whose
+      // path is actually a PARENT DIRECTORY of another real file (e.g.
+      // "src/components": "" alongside "src/components/SharedLayout.tsx":
+      // "..."). Restoring that stray entry writes a plain FILE at
+      // /src/components, and the next mkdir('/src/components') for the
+      // real SharedLayout.tsx then fails (can't mkdir where a file
+      // already exists) — silently dropping the real file and leaving an
+      // empty file where a folder should be. Drop any path that is a
+      // prefix-of-another-path before restoring, since such an entry can
+      // never legitimately be a real file.
+      if (filesToRestore && typeof filesToRestore === 'object') {
+        const allPaths = Object.keys(filesToRestore);
+        const cleaned: Record<string, any> = {};
+        for (const path of allPaths) {
+          const isParentDirOfAnother = allPaths.some(
+            (other) => other !== path && other.startsWith(path.replace(/\/$/, '') + '/')
+          );
+          if (isParentDirOfAnother) {
+            console.warn('[CHAT LOAD] Dropping stray directory-as-file entry:', path);
+            continue;
+          }
+          cleaned[path] = filesToRestore[path];
+        }
+        filesToRestore = cleaned;
+      }
+
       setInitialMessages(messages);
       description.set(project.title);
       chatId.set(mixedId);
@@ -310,7 +309,7 @@ export function useChatHistory() {
   return {
     ready: !mixedId || ready,
     initialMessages,
-    storeMessageHistory: async (messages: Message[], files?: Record<string, any>, skipContainerRead: boolean = false) => {
+    storeMessageHistory: async (messages: Message[], files?: Record<string, any>) => {
       if (messages.length === 0) return;
 
       messages = messages.filter((m) => !m.annotations?.includes('no-store'));
@@ -342,10 +341,36 @@ export function useChatHistory() {
 
       const title = description.get() || 'Untitled Project';
 
-      // Capture all files from passed argument / workbench store AND WebContainer filesystem (unless skipped mid-stream)
+      // Capture all files from passed argument / workbench store AND WebContainer filesystem
       const storeFiles = files || workbenchStore.files.get() || {};
-      const containerFiles = skipContainerRead ? {} : await readWebContainerFiles();
+      const containerFiles = await readWebContainerFiles();
       const mergedFiles = { ...storeFiles, ...containerFiles };
+
+      // ⚠️ FIX: this is the single choke-point every save goes through —
+      // including processSampledMessages' throttled save on every streamed
+      // chat message (Chat.client.tsx). If this fires while the page has
+      // just reloaded and the async file-restore hasn't finished yet (or
+      // any other momentary race), workbenchStore.files can be empty even
+      // though the project genuinely has real files saved from before.
+      // Without this guard, that empty snapshot silently overwrote the
+      // previously-good database record — this was the actual mechanism
+      // behind "files disappear a few minutes after sleep/reload" even
+      // though the original save had succeeded correctly. Never let an
+      // empty file-map overwrite an existing project that already has files.
+      if (Object.keys(mergedFiles).length === 0) {
+        const existing = await loadFromDatabase(finalChatId).catch(() => null);
+        const existingFileCount = existing?.files
+          ? Object.keys(typeof existing.files === 'string' ? JSON.parse(existing.files) : existing.files).length
+          : 0;
+        if (existingFileCount > 0) {
+          console.warn(
+            '[CHAT STORE] Skipping save — would overwrite',
+            existingFileCount,
+            'existing file(s) with an empty file-map. This save was likely triggered before the workbench finished restoring.'
+          );
+          return;
+        }
+      }
 
       console.log('[CHAT STORE] Saving:', finalChatId, '| title:', title, '| files count:', Object.keys(mergedFiles).length);
 
