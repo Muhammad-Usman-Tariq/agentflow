@@ -17,7 +17,7 @@ export type ProgressCallback = (event: ProgressEvent) => void;
 export interface ProgressEvent {
   runId: number;
   agentName: string;
-  status: 'started' | 'done' | 'failed';
+  status: 'started' | 'done' | 'failed' | 'file_generated';
   message: string;
   data?: any;
 }
@@ -51,7 +51,9 @@ export async function runAgentPlan(
   onProgress?: ProgressCallback
 ): Promise<{ context: AgentContext; failures: Array<{ agentName: string; error: string }> }> {
 
-  let context: AgentContext = {};
+  let context: AgentContext = {
+    ...(plan.existingFiles ? { existingFiles: plan.existingFiles } : {}),
+  };
   // ⚠️ FIX: agent failures were saved to the DB but never bubbled up past
   // this function — the orchestrator had no way to know Coder (or any
   // agent) actually failed, so it silently fell back to boilerplate
@@ -151,6 +153,7 @@ async function runSingleAgent(
     chatId: plan.chatId,
     runId: plan.runId,
     context,
+    onProgress,
   };
 
   const output: AgentOutput = await agent.run(input);

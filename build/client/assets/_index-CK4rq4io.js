@@ -1,1 +1,0 @@
-import{default as a,m as e}from"./chat._id-D8azXy5O.js";import"./components-Bjj1g-EF.js";import"./react-toastify.esm-BGYY-_q9.js";import"./index-pZ3YDUod.js";import"./mobile-Cp3-Wvf8.js";export{a as default,e as meta};

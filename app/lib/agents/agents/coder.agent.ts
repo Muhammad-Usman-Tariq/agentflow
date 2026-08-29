@@ -987,7 +987,7 @@ export class CoderAgent extends AgentBase {
     const versionHints = buildVersionHintsBlock(plannedPkg);
 
     if (fileList.length > 0) {
-      allGeneratedFiles = await this.generatePerFile(fileList, requirements, architecture, designDecisions, versionHints);
+      allGeneratedFiles = await this.generatePerFile(fileList, requirements, architecture, designDecisions, versionHints, input);
     } else {
       console.warn('[Coder] Architecture has no fileStructure — falling back to blob generation');
       allGeneratedFiles = await this.generateAsBlobsFallback(requirements, architecture, designDecisions);
@@ -995,6 +995,18 @@ export class CoderAgent extends AgentBase {
 
     const configTemplates = buildConfigFileTemplates(requirements, architecture);
     allGeneratedFiles = { ...allGeneratedFiles, ...configTemplates };
+
+    if (typeof input.onProgress === 'function') {
+      for (const [cp, cc] of Object.entries(configTemplates)) {
+        input.onProgress({
+          runId: input.runId || 0,
+          agentName: 'coder',
+          status: 'file_generated',
+          message: `Generated ${cp}`,
+          data: { filePath: cp, content: cc },
+        });
+      }
+    }
 
     if (Object.keys(allGeneratedFiles).length === 0) {
       throw new Error('Coder generated zero files');
@@ -1122,9 +1134,13 @@ export class CoderAgent extends AgentBase {
     architecture: any,
     designDecisions: any,
     versionHints?: string,
+    input?: AgentInput,
   ): Promise<Record<string, string>> {
     const files: Record<string, string> = {};
     const failed: string[] = [];
+    const existingFiles = input?.context?.existingFiles || {};
+    const onProgress = input?.onProgress;
+    const runId = input?.runId || 0;
 
     const frontendFiles = fileList.filter((f) => !isBackendPath(f.path) && !isConfigFile(f.path));
     const backendFiles = fileList.filter((f) => isBackendPath(f.path) && !isConfigFile(f.path));
@@ -1136,7 +1152,32 @@ export class CoderAgent extends AgentBase {
         '...',
     );
 
+    const notifyFile = (filePath: string, content: string) => {
+      if (typeof onProgress === 'function') {
+        onProgress({
+          runId,
+          agentName: 'coder',
+          status: 'file_generated',
+          message: `Generated ${filePath}`,
+          data: { filePath, content },
+        });
+      }
+    };
+
+    const isExistingFileValid = (content: string): boolean => {
+      if (!content || typeof content !== 'string') return false;
+      if (content.includes('⚠️ Placeholder') || content.includes('generation failed after retries')) return false;
+      return content.trim().length > 10;
+    };
+
     for (const file of frontendFiles) {
+      if (existingFiles[file.path] && isExistingFileValid(existingFiles[file.path])) {
+        console.log(`[Coder] ⏩ Reusing already generated file for ${file.path}`);
+        files[file.path] = existingFiles[file.path];
+        notifyFile(file.path, files[file.path]);
+        continue;
+      }
+
       console.log(`[Coder] → ${file.path}`);
       const code = await this.generateSingleFileSafe(
         FRONTEND_FILE_SYSTEM_PROMPT,
@@ -1149,9 +1190,17 @@ export class CoderAgent extends AgentBase {
         files[file.path] = this.createPlaceholderStub(file.path, file.purpose);
         failed.push(file.path);
       }
+      notifyFile(file.path, files[file.path]);
     }
 
     for (const file of backendFiles) {
+      if (existingFiles[file.path] && isExistingFileValid(existingFiles[file.path])) {
+        console.log(`[Coder] ⏩ Reusing already generated file for ${file.path}`);
+        files[file.path] = existingFiles[file.path];
+        notifyFile(file.path, files[file.path]);
+        continue;
+      }
+
       console.log(`[Coder] → ${file.path}`);
       const code = await this.generateSingleFileSafe(
         BACKEND_FILE_SYSTEM_PROMPT,
@@ -1164,6 +1213,7 @@ export class CoderAgent extends AgentBase {
         files[file.path] = this.createPlaceholderStub(file.path, file.purpose);
         failed.push(file.path);
       }
+      notifyFile(file.path, files[file.path]);
     }
 
     if (failed.length > 0) {

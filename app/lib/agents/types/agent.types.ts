@@ -5,6 +5,7 @@ export interface AgentInput {
   chatId: string;             // Which chat this belongs to
   runId?: number;             // DB run ID for tracking
   context?: AgentContext;     // What previous agents produced
+  onProgress?: any;           // Progress callback for streaming events
 }
 
 export interface AgentContext {
@@ -15,6 +16,7 @@ export interface AgentContext {
   reviewFeedback?: ReviewFeedback;      // From Reviewer
   dataFiles?: { dataFiles?: Record<string, string>; sampleData?: any };       // From Data agent
   integrationData?: { files?: Record<string, string>; packages?: string[]; integrations?: string[]; envVariables?: any[] }; // From Integration agent
+  existingFiles?: Record<string, string>; // Existing files loaded from DB or previous attempts
 }
 
 export interface AgentOutput {

@@ -107,6 +107,7 @@ export class Orchestrator extends AgentBase {
         projectType: plan.projectType,
         phases: plan.phases as any,
         env: this.env,
+        existingFiles: existingProject?.files,
       };
 
       // Step 4 — Execute all agents
@@ -163,9 +164,12 @@ export class Orchestrator extends AgentBase {
       // actually produced no working app. Now a Coder failure is reported
       // as a genuine failure, with its real error message attached.
       const coderFailed = failures.some(f => f.agentName === 'coder');
+      const fileCount = Object.keys(allFiles).length;
+      const isPartial = coderFailed && fileCount > 2;
 
       return {
         success: !coderFailed,
+        partial: isPartial,
         files: allFiles,
         runId,
         ...(failures.length > 0 ? { warnings: failures } : {}),

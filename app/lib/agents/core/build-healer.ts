@@ -198,17 +198,30 @@ export async function runBuildHeal(
     console.log(`[BuildHealer] Attempting LLM fix for: ${implicatedPath}`);
     const failingContent = currentFiles[implicatedPath] || '(empty)';
 
+    const NOT_EXPORTED_RE = /"([^"]+)"\s+is not exported by\s+"([^"]+)"/;
+    const notExportedMatch = errorOutput.match(NOT_EXPORTED_RE);
+    const isMissingExport = !!notExportedMatch;
+    const missingSymbol = notExportedMatch ? notExportedMatch[1] : '';
+
     try {
-      const fixPrompt =
-        `You are fixing a build error in a generated web application.\n\n` +
-        `File with error: ${implicatedPath}\n\n` +
-        `Current file content:\n\`\`\`\n${failingContent.slice(0, 2000)}\n\`\`\`\n\n` +
-        `Build error:\n\`\`\`\n${errorOutput.slice(0, 1000)}\n\`\`\`\n\n` +
-        `INSTRUCTIONS:\n` +
-        `- Fix ONLY the error shown above\n` +
-        `- Output ONLY the raw corrected file content — no markdown, no explanation\n` +
-        `- Ensure all braces, parentheses, and brackets are balanced\n` +
-        `- Define complex object/array values as const variables above the component — never inline them as JSX prop values`;
+      const fixPrompt = isMissingExport
+        ? `You are adding a missing export to a module.\n\n` +
+          `File: ${implicatedPath}\n\n` +
+          `Current file content:\n\`\`\`\n${failingContent.slice(0, 2000)}\n\`\`\`\n\n` +
+          `The build error says: "${missingSymbol}" is not exported by this file, but it is imported elsewhere expecting that export.\n\n` +
+          `INSTRUCTIONS:\n` +
+          `- Add a working implementation of "${missingSymbol}" as a named export in this file\n` +
+          `- Keep all existing exports and content intact — only add what's missing\n` +
+          `- Output ONLY the raw corrected file content — no markdown, no explanation`
+        : `You are fixing a build error in a generated web application.\n\n` +
+          `File with error: ${implicatedPath}\n\n` +
+          `Current file content:\n\`\`\`\n${failingContent.slice(0, 2000)}\n\`\`\`\n\n` +
+          `Build error:\n\`\`\`\n${errorOutput.slice(0, 1000)}\n\`\`\`\n\n` +
+          `INSTRUCTIONS:\n` +
+          `- Fix ONLY the error shown above\n` +
+          `- Output ONLY the raw corrected file content — no markdown, no explanation\n` +
+          `- Ensure all braces, parentheses, and brackets are balanced\n` +
+          `- Define complex object/array values as const variables above the component — never inline them as JSX prop values`;
 
       const fixed = await callLLM(
         'You are an expert TypeScript/React developer. Fix the build error. Output only raw file content, no markdown.',
@@ -256,6 +269,19 @@ function identifyFailingFile(
   files: Record<string, string>,
 ): string | null {
   const fileKeys = Object.keys(files);
+
+  // Fix C: check for Vite/Rollup "not exported by" error first to route fix to exporting file
+  const NOT_EXPORTED_RE = /"([^"]+)"\s+is not exported by\s+"([^"]+)"/;
+  const notExportedMatch = errorOutput.match(NOT_EXPORTED_RE);
+  if (notExportedMatch) {
+    const [, missingSymbol, exportingFileRaw] = notExportedMatch;
+    const exportingFile = exportingFileRaw.replace(/\\/g, '/').replace(/^\/+/, '');
+    const match = fileKeys.find(
+      (k) => k === exportingFile || exportingFile.endsWith(k) || k.endsWith('/' + exportingFile.split('/').pop()!),
+    );
+    if (match) return match;
+  }
+
   // Vite/esbuild error format: path/to/file.tsx:10:5 or path/to/file.tsx (line N)
   const FILE_REF_RE = /([a-zA-Z0-9_./\\-]+\.(tsx|ts|jsx|js|css|json))[:\s(]/g;
   let m: RegExpExecArray | null;

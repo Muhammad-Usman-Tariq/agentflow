@@ -36,7 +36,8 @@ export interface AgentPlan {
   userRequest: string;
   projectType: ProjectType;
   phases: AgentPhase[];       // Execution order
-   env?: Record<string, string>;
+  env?: Record<string, string>;
+  existingFiles?: Record<string, string>;
 }
 
 // Sequential = one by one, Parallel = all at once

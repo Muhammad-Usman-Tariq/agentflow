@@ -305,6 +305,35 @@ export async function saveProjectFilesOnly(
   return result.rows[0];
 }
 
+// Fix B: incremental file merge into projects.files using Postgres jsonb concatenation (||).
+// Merges new file(s) into existing files object without overwriting other files.
+export async function saveProjectFileIncremental(
+  id: string,
+  newFiles: Record<string, string>,
+  fallbackUserId: string,
+  env?: Record<string, string>,
+) {
+  const newFilesJson = JSON.stringify(newFiles || {});
+
+  try {
+    const result = await query(
+      `INSERT INTO projects (chat_id, title, messages, files, user_id, updated_at)
+       VALUES ($1, 'Untitled Project', '[]'::jsonb, $2::jsonb, $3, NOW())
+       ON CONFLICT (chat_id) DO UPDATE
+       SET files      = projects.files || EXCLUDED.files,
+           user_id    = COALESCE(projects.user_id, EXCLUDED.user_id),
+           updated_at = NOW()
+       RETURNING id`,
+      [id, newFilesJson, fallbackUserId],
+      env,
+    );
+    return result.rows[0];
+  } catch (e: any) {
+    console.error('[DB saveIncremental] Error:', e?.message);
+    return null;
+  }
+}
+
 export async function getProjectForUser(id: string, userId: string, env?: Record<string, string>) {
   try {
     const result = await query(

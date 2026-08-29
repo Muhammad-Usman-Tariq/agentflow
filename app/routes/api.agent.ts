@@ -91,6 +91,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
       chatId,
       async (event) => {
         try {
+          if (event.status === 'file_generated' && event.data?.filePath && event.data?.content) {
+            const { saveProjectFileIncremental } = await import('~/lib/db.server');
+            await saveProjectFileIncremental(
+              chatId,
+              { [event.data.filePath]: event.data.content },
+              userId,
+              env,
+            );
+            console.log(`[Agent API] 💾 Incrementally saved file to DB: ${event.data.filePath}`);
+          }
+
           await query(
             `INSERT INTO agent_tasks
              (run_id, agent_name, status, input, output, started_at, completed_at)
@@ -122,12 +133,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
     }
     // ────────────────────────────────────────────────────────────────────────
 
-    // Bug 1 fix: use saveProjectFilesOnly (not saveProjectForUser) so the agent's
-    // server-side save only writes the files column. The ON CONFLICT clause in
-    // saveProjectFilesOnly preserves messages / title / user_id for existing rows.
-    // Before this fix the agent passed messages=[] to saveProjectForUser and
-    // overwrote the real chat history on every generation run.
-    const filesToSave = result.files && Object.keys(result.files).length > 0 ? result.files : null;
+    // Fix A: only perform final server-side save when the run actually succeeded.
+    // On failure (result.success === false), do NOT overwrite existing project files
+    // in the DB with fallback boilerplate files (package.json / index.html).
+    const filesToSave =
+      result.success && result.files && Object.keys(result.files).length > 0
+        ? result.files
+        : null;
     if (filesToSave) {
       try {
         const { saveProjectFilesOnly } = await import('~/lib/db.server');
@@ -141,14 +153,16 @@ export async function action({ request, context }: ActionFunctionArgs) {
     }
 
     if (!result.success) {
+      const isPartial = (result as any).partial || (result.files && Object.keys(result.files).length > 2);
       return json({
         success: false,
+        partial: isPartial,
         error: result.error,
         files: result.files,
         fileCount: Object.keys(result.files || {}).length,
         runId: result.runId,
         warnings: (result as any).warnings,
-      }, withAgentCookie({ status: 500 }));
+      }, withAgentCookie({ status: isPartial ? 200 : 500 }));
     }
 
     return json({

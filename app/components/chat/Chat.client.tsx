@@ -449,11 +449,14 @@ export const ChatImpl = memo(
         }
         // ────────────────────────────────────────────────────────────────────────
 
-        if (result.success && result.runId) {
+        if ((result.success || result.partial) && result.runId) {
           setAgentRunId(result.runId);
         }
 
-        if (result.success && result.files && Object.keys(result.files).length > 0) {
+        if ((result.success || result.partial) && result.files && Object.keys(result.files).length > 0) {
+          if (result.partial) {
+            toast.warning(`Partial generation (${Object.keys(result.files).length} files created). Re-run to finish remaining components.`);
+          }
           const { webcontainer } = await import('~/lib/webcontainer');
           const container = await webcontainer;
 
@@ -844,7 +847,7 @@ export const ChatImpl = memo(
                         body: JSON.stringify({ userRequest: req, chatId: currentChatId, forceOverwrite: true }),
                       });
                       const result = await res.json() as any;
-                      if (result.success && result.files && Object.keys(result.files).length > 0) {
+                      if ((result.success || result.partial) && result.files && Object.keys(result.files).length > 0) {
                         const { webcontainer } = await import('~/lib/webcontainer');
                         const container = await webcontainer;
                         for (const [fp, content] of Object.entries(result.files as Record<string, string>)) {
