@@ -1,4 +1,4 @@
-import { l as logger, D as DEFAULT_MODEL, P as PROVIDER_LIST } from './server-build-VdP8t4f-.js';
+import { l as logger, D as DEFAULT_MODEL, P as PROVIDER_LIST } from './server-build-DErFMLBt.js';
 import 'react/jsx-runtime';
 import '@remix-run/react';
 import 'isbot';
@@ -59,7 +59,7 @@ let logStore = null;
 const getLogStore = () => {
   if (!logStore && typeof window !== "undefined") {
     try {
-      import('./server-build-VdP8t4f-.js').then(n => n.d).then(({ logStore: store }) => {
+      import('./server-build-DErFMLBt.js').then(n => n.d).then(({ logStore: store }) => {
         logStore = store;
       }).catch(() => {
       });
@@ -530,7 +530,7 @@ class DebugLogger {
       const store = getLogStore();
       if (!store) {
         try {
-          const { logStore: storeModule } = await import('./server-build-VdP8t4f-.js').then(n => n.d);
+          const { logStore: storeModule } = await import('./server-build-DErFMLBt.js').then(n => n.d);
           logStore = storeModule;
           return this._getLogStoreLogs();
         } catch {

@@ -164,13 +164,29 @@ export class Orchestrator extends AgentBase {
       // actually produced no working app. Now a Coder failure is reported
       // as a genuine failure, with its real error message attached.
       const coderFailed = failures.some(f => f.agentName === 'coder');
-      const fileCount = Object.keys(allFiles).length;
-      const isPartial = coderFailed && fileCount > 2;
+      let effectiveFiles = allFiles;
+      let isPartial = false;
+
+      if (coderFailed) {
+        try {
+          const { getProject } = await import('~/lib/db.server');
+          const liveProject = await getProject(chatId, this.env);
+          const liveFiles = liveProject?.files
+            ? (typeof liveProject.files === 'string' ? JSON.parse(liveProject.files) : liveProject.files)
+            : {};
+          if (Object.keys(liveFiles).length > 2) {
+            effectiveFiles = liveFiles;
+            isPartial = true;
+          }
+        } catch (e: any) {
+          console.warn('[Orchestrator] Could not load live files for partial-success check (non-fatal):', e?.message);
+        }
+      }
 
       return {
         success: !coderFailed,
         partial: isPartial,
-        files: allFiles,
+        files: effectiveFiles,
         runId,
         ...(failures.length > 0 ? { warnings: failures } : {}),
         ...(coderFailed ? { error: `Coder agent failed: ${failures.find(f => f.agentName === 'coder')?.error}` } : {}),

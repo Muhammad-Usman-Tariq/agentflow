@@ -976,6 +976,26 @@ export class CoderAgent extends AgentBase {
       throw new Error('Coder needs requirements and architecture first');
     }
 
+    // Gap 1 fix: merge in anything already saved for this chat_id, including files
+    // saved by an earlier (timed-out) attempt of THIS SAME run via the incremental save —
+    // not just files from before this run started.
+    let existingFiles = input?.context?.existingFiles || {};
+    if (input.chatId) {
+      try {
+        const { getProject } = await import('~/lib/db.server');
+        const liveProject = await getProject(input.chatId, this.env);
+        if (liveProject?.files) {
+          const liveFiles = typeof liveProject.files === 'string' ? JSON.parse(liveProject.files) : liveProject.files;
+          existingFiles = { ...existingFiles, ...liveFiles };
+        }
+      } catch (e: any) {
+        console.warn('[Coder] Could not load live incremental files (non-fatal):', e?.message);
+      }
+    }
+
+    if (!input.context) input.context = {};
+    input.context.existingFiles = existingFiles;
+
     const fileList: Array<{ path: string; purpose: string }> = (architecture as any).fileStructure || [];
 
     let allGeneratedFiles: Record<string, string> = {};
