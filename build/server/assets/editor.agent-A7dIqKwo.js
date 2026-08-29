@@ -1,4 +1,4 @@
-import { A as AgentBase, E as EDITOR_SYSTEM_PROMPT, a as EDITOR_USER_PROMPT } from './server-build-DErFMLBt.js';
+import { A as AgentBase, E as EDITOR_SYSTEM_PROMPT, a as EDITOR_USER_PROMPT, r as reconcileDependencies, c as createMissingImportStubs } from './server-build-BywvCywO.js';
 import 'react/jsx-runtime';
 import '@remix-run/react';
 import 'isbot';
@@ -90,6 +90,8 @@ class EditorAgent extends AgentBase {
       throw new Error("EditorAgent returned no changed files");
     }
     const mergedFiles = { ...existingFiles, ...changedFiles };
+    reconcileDependencies(mergedFiles);
+    createMissingImportStubs(mergedFiles);
     console.log(
       `[Editor] ✅ Surgical edit complete: ${Object.keys(changedFiles).length} file(s) changed out of ${Object.keys(existingFiles).length} existing`
     );

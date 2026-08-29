@@ -54,6 +54,12 @@ export const EDITOR_USER_PROMPT = (
   `All files in existing project (${allFilePaths.length} total):\n${allFilePaths.join(', ')}\n\n` +
   `Most relevant existing file contents (for context):\n` +
   Object.entries(relevantFileContents)
-    .map(([path, content]) => `\n--- ${path} ---\n${content.slice(0, 1500)}`)
+    .map(([path, content]) => {
+      const safeContent = typeof content === 'string' ? content : JSON.stringify(content ?? '');
+      if (typeof content !== 'string') {
+        console.warn(`[Editor] Non-string content for ${path} — coercing before prompt build.`);
+      }
+      return `\n--- ${path} ---\n${safeContent.slice(0, 1500)}`;
+    })
     .join('\n') +
   `\n\nMake targeted changes only. Return JSON with changedFiles only.`;

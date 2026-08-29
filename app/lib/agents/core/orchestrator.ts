@@ -72,7 +72,24 @@ export class Orchestrator extends AgentBase {
               context: { existingFiles: existingProject.files } as any,
             });
             if (!editResult.success) throw new Error(editResult.error || 'EditorAgent failed');
-            return { success: true, files: editResult.data };
+
+            // Run the same consistency/safety checks the coder pipeline uses, so a scoped
+            // edit gets the same guarantees as a full generation.
+            const { reconcileDependencies } = await import('../agents/coder.agent');
+            const { runBuildHeal } = await import('../core/build-healer');
+            const mergedFiles = editResult.data;
+            const depWarnings = reconcileDependencies(mergedFiles);
+            const healResult = await runBuildHeal(mergedFiles, (sys, user, json, timeout) =>
+              this.callLLM(sys, user, json, timeout),
+            );
+
+            return {
+              success: true,
+              files: healResult.files,
+              ...(depWarnings.length || healResult.buildWarnings.length
+                ? { warnings: [...depWarnings, ...healResult.buildWarnings] }
+                : {}),
+            };
           }
 
           if (cls.classification === 'unrelated-new' || cls.classification === 'ambiguous') {

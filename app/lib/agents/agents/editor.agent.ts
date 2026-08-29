@@ -1,6 +1,7 @@
 import { AgentBase } from '../core/agent-base';
 import type { AgentInput, AgentOutput } from '../types/agent.types';
 import { EDITOR_SYSTEM_PROMPT, EDITOR_USER_PROMPT } from '../prompts/editor.prompt';
+import { reconcileDependencies, createMissingImportStubs } from './coder.agent';
 
 export class EditorAgent extends AgentBase {
   constructor(env?: Record<string, string>) {
@@ -67,6 +68,10 @@ export class EditorAgent extends AgentBase {
 
     // Surgical merge: overwrite only the returned paths, keep everything else
     const mergedFiles = { ...existingFiles, ...changedFiles };
+
+    // Apply quality passes on merged project output
+    reconcileDependencies(mergedFiles);
+    createMissingImportStubs(mergedFiles);
 
     console.log(
       `[Editor] ✅ Surgical edit complete: ${Object.keys(changedFiles).length} file(s) changed out of ${Object.keys(existingFiles).length} existing`,

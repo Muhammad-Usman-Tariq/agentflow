@@ -345,7 +345,7 @@ function guardReactCompatibility(files: Record<string, string>): void {
   }
 }
 
-function reconcileDependencies(files: Record<string, string>): string[] {
+export function reconcileDependencies(files: Record<string, string>): string[] {
   const warnings: string[] = [];
   const sourceFiles = Object.entries(files).filter(
     ([p]) => /\.(ts|tsx|js|jsx|mjs|cjs)$/.test(p) && p !== 'vite.config.ts' && p !== 'postcss.config.js' && p !== 'tailwind.config.js',
@@ -906,7 +906,7 @@ function resolveRelativeImport(fromFile: string, importPath: string): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Bug 3 fix: create functional component stubs for missing local imports
-function createMissingImportStubs(files: Record<string, string>): string[] {
+export function createMissingImportStubs(files: Record<string, string>): string[] {
   const warnings: string[] = [];
   const IMPORT_RE = /^(?:import\s+(?:[\s\S]*?from\s+)?|export\s+\{[^}]*\}\s+from\s+)['"](\.[\/]?[^'"]+)['"]/gm;
   const REQUIRE_RE = /require\s*\(\s*['"](\.[^'"]+)['"]\s*\)/g;
@@ -1018,13 +1018,15 @@ export class CoderAgent extends AgentBase {
 
     if (typeof input.onProgress === 'function') {
       for (const [cp, cc] of Object.entries(configTemplates)) {
-        input.onProgress({
-          runId: input.runId || 0,
-          agentName: 'coder',
-          status: 'file_generated',
-          message: `Generated ${cp}`,
-          data: { filePath: cp, content: cc },
-        });
+        try {
+          await input.onProgress({
+            runId: input.runId || 0,
+            agentName: 'coder',
+            status: 'file_generated',
+            message: `Generated ${cp}`,
+            data: { filePath: cp, content: cc },
+          });
+        } catch {}
       }
     }
 
@@ -1172,15 +1174,19 @@ export class CoderAgent extends AgentBase {
         '...',
     );
 
-    const notifyFile = (filePath: string, content: string) => {
+    const notifyFile = async (filePath: string, content: string) => {
       if (typeof onProgress === 'function') {
-        onProgress({
-          runId,
-          agentName: 'coder',
-          status: 'file_generated',
-          message: `Generated ${filePath}`,
-          data: { filePath, content },
-        });
+        try {
+          await onProgress({
+            runId,
+            agentName: 'coder',
+            status: 'file_generated',
+            message: `Generated ${filePath}`,
+            data: { filePath, content },
+          });
+        } catch (e: any) {
+          console.warn(`[Coder] notifyFile error for ${filePath}:`, e?.message);
+        }
       }
     };
 
@@ -1194,7 +1200,7 @@ export class CoderAgent extends AgentBase {
       if (existingFiles[file.path] && isExistingFileValid(existingFiles[file.path])) {
         console.log(`[Coder] ⏩ Reusing already generated file for ${file.path}`);
         files[file.path] = existingFiles[file.path];
-        notifyFile(file.path, files[file.path]);
+        await notifyFile(file.path, files[file.path]);
         continue;
       }
 
@@ -1210,14 +1216,14 @@ export class CoderAgent extends AgentBase {
         files[file.path] = this.createPlaceholderStub(file.path, file.purpose);
         failed.push(file.path);
       }
-      notifyFile(file.path, files[file.path]);
+      await notifyFile(file.path, files[file.path]);
     }
 
     for (const file of backendFiles) {
       if (existingFiles[file.path] && isExistingFileValid(existingFiles[file.path])) {
         console.log(`[Coder] ⏩ Reusing already generated file for ${file.path}`);
         files[file.path] = existingFiles[file.path];
-        notifyFile(file.path, files[file.path]);
+        await notifyFile(file.path, files[file.path]);
         continue;
       }
 
@@ -1233,7 +1239,7 @@ export class CoderAgent extends AgentBase {
         files[file.path] = this.createPlaceholderStub(file.path, file.purpose);
         failed.push(file.path);
       }
-      notifyFile(file.path, files[file.path]);
+      await notifyFile(file.path, files[file.path]);
     }
 
     if (failed.length > 0) {
