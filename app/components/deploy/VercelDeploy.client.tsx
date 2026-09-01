@@ -39,6 +39,7 @@ export function useVercelDeploy() {
       workbenchStore.addArtifact({
         id: deploymentId,
         messageId: deploymentId,
+        artifactId: deploymentId,
         title: 'Vercel Deployment',
         type: 'standalone',
       });

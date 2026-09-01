@@ -40,6 +40,7 @@ export function useGitLabDeploy() {
       workbenchStore.addArtifact({
         id: deploymentId,
         messageId: deploymentId,
+        artifactId: deploymentId,
         title: 'GitLab Deployment',
         type: 'standalone',
       });

@@ -39,6 +39,7 @@ export function useNetlifyDeploy() {
       workbenchStore.addArtifact({
         id: deploymentId,
         messageId: deploymentId,
+        artifactId: deploymentId,
         title: 'Netlify Deployment',
         type: 'standalone',
       });

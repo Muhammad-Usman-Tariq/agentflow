@@ -504,6 +504,19 @@ export const ChatImpl = memo(
           workbenchStore.setDocuments(fileMap);
           workbenchStore.showWorkbench.set(true);
 
+          // Register this generation as an artifact so deploy (Netlify/Vercel/GitHub/GitLab)
+          // can find it via workbenchStore.firstArtifact. Without this, every deploy button
+          // throws "No active project found" regardless of how the generation went, because
+          // the orchestrator path never went through the /api/chat streaming parser that
+          // normally calls addArtifact via a <boltArtifact> tag.
+          workbenchStore.addArtifact({
+            messageId: currentChatId,
+            artifactId: currentChatId,
+            id: currentChatId,
+            title: (result as any).title || 'Generated Project',
+            type: 'bundled',
+          });
+
           // Start dev server (and backend if the project needs one)
           try {
             const hasPackageJson = 'package.json' in result.files;
@@ -862,6 +875,14 @@ export const ChatImpl = memo(
                         for (const [path, dirent] of Object.entries(fm)) workbenchStore.files.setKey(path, dirent);
                         workbenchStore.setDocuments(fm);
                         workbenchStore.showWorkbench.set(true);
+
+                        workbenchStore.addArtifact({
+                          messageId: currentChatId,
+                          artifactId: currentChatId,
+                          id: currentChatId,
+                          title: (result as any).title || 'Generated Project',
+                          type: 'bundled',
+                        });
                       }
                     } catch (e) { console.error('Overwrite agent error:', e); }
                     finally { isAgentRunningRef.current = false; setAgentRunning(false); }

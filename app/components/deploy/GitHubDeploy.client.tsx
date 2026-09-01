@@ -40,6 +40,7 @@ export function useGitHubDeploy() {
       workbenchStore.addArtifact({
         id: deploymentId,
         messageId: deploymentId,
+        artifactId: deploymentId,
         title: 'GitHub Deployment',
         type: 'standalone',
       });

@@ -271,6 +271,18 @@ export function useChatHistory() {
           workbenchStore.showWorkbench.set(true);
           chatStore.setKey('started', true);
 
+          // Same fix as runAgent() — register this restored project as an artifact so
+          // deploy (Netlify/Vercel/GitHub/GitLab) can find it via workbenchStore.firstArtifact.
+          // Without this, only brand-new generations become deployable; every previously
+          // generated project would still show "No active project found" on reopen.
+          workbenchStore.addArtifact({
+            messageId: mixedId,
+            artifactId: mixedId,
+            id: mixedId,
+            title: description.get() || project.title || 'Restored Project',
+            type: 'bundled',
+          });
+
           // Select the first file to show in the code editor
           const firstFileKey = Object.keys(fileMap).find((k) => k.endsWith('.tsx') || k.endsWith('.jsx') || k.endsWith('.html') || k.endsWith('.js') || k.endsWith('.ts')) || Object.keys(fileMap)[0];
           if (firstFileKey) {
